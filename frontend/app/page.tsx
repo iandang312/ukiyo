@@ -9,7 +9,7 @@ export default function HomePage() {
             <div className="flex w-screen items-center justify-center py-8">
                 <TypingText
                     text={["welcome to ukiyo"]}
-                    typingSpeed={100}
+                    typingSpeed={55}
                     deletingSpeed={50}
                     pauseDuration={0}
                     loop={true}
@@ -22,9 +22,9 @@ export default function HomePage() {
             <div className="flex w-screen items-center justify-center py-8">
                 <TypingText
                     text={["","the all in one ai-powered building platform"]}
-                    typingSpeed={100}
+                    typingSpeed={55}
                     deletingSpeed={50}
-                    pauseDuration={3000}
+                    pauseDuration={1400}
                     loop={false}
                     className="ml-4 text-2xl text-white"
                     cursorCharacter="|"
