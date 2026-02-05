@@ -43,7 +43,7 @@ export function Meteors({
   }, [count])
 
   return (
-    <div className={cn("fixed inset-0 overflow-hidden bg-neutral-950", className)}>
+    <div className={cn("absolute inset-0 overflow-hidden bg-neutral-950", className)}>
       {/* Keyframe animation - uses vmax for viewport scaling */}
       <style>{`
         @keyframes meteor-fall {
