@@ -15,3 +15,7 @@ dev = [
   "pytest",
   "ruff",
 ]
+
+[tool.setuptools.packages.find]
+where = ["backend/ukiyo_service/src"]
+include = ["ukiyo_service"]
