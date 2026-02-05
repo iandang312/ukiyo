@@ -16,13 +16,6 @@ export interface MeteorsProps {
   tailColor?: string
 }
 
-interface MeteorData {
-  id: number
-  left: number
-  delay: number
-  duration: number
-}
-
 export function Meteors({
   className,
   children,
@@ -116,7 +109,7 @@ export function Meteors({
       />
 
       {/* Content layer */}
-      {children && <div className="relative z-10 h-full w-full">{children}</div>}
+      {children && <div className="relative z-10 h-full w-full flex flex-col items-center justify-center">{children}</div>}
     </div>
   )
 }
