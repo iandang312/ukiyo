@@ -36,7 +36,7 @@ export default function HomePage() {
 
           <div style={{ position: "absolute", bottom: "10%", width: "100%", display: "flex", justifyContent: "center" }}>
             <Button variant="outline" className="rounded-full hover:bg-gray-300">
-              <Link href="/chat">get started</Link>
+              <Link href="/signup">get started</Link>
             </Button>
           </div>
 
