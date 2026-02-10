@@ -17,7 +17,7 @@ export default function HomePage() {
               deletingSpeed={50}
               pauseDuration={0}
               loop={true}
-              className="text-2xl text-white"
+              className="text-4xl text-white"
               cursorCharacter="|"
               showCursor={true}
             />
@@ -28,7 +28,7 @@ export default function HomePage() {
               deletingSpeed={50}
               pauseDuration={1400}
               loop={false}
-              className="text-2xl text-white"
+              className="text-4xl text-white"
               cursorCharacter="|"
               showCursor={true}
             />
