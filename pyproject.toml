@@ -31,3 +31,7 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["backend/ukiyo_service/src"]
 include = ["ukiyo_service*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
