@@ -3,19 +3,31 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "my-fastapi-app"
+name = "ukiyo-service"
 version = "0.1.0"
+requires-python = ">=3.12"
 dependencies = [
   "fastapi",
-  "uvicorn[standard]"
+  "uvicorn[standard]",
+  "sqlalchemy[asyncio]",
+  "alembic",
+  "asyncpg",
+  "pgvector",
+  "fastapi-users[sqlalchemy]",
+  "httpx",
+  "openai",
+  "anthropic",
+  "google-genai",
+  "pydantic-settings",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest",
+  "pytest-asyncio",
   "ruff",
 ]
 
 [tool.setuptools.packages.find]
 where = ["backend/ukiyo_service/src"]
-include = ["ukiyo_service"]
+include = ["ukiyo_service*"]
