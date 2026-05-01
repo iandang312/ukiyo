@@ -1,11 +1,7 @@
-import { Button } from "@/components/ui/button";
-import Link from "next/dist/client/link";
-import { ChatbotDemo } from "@/components/ui/chatbot";
+"use client";
 
-export default function SignUpPage() {
-    return (
-        <div>
-            <ChatbotDemo />
-        </div>
-    );
+import { ChatPanel } from "@/components/chat/chat-panel";
+
+export default function ChatIndexPage() {
+  return <ChatPanel conversationId={null} />;
 }
