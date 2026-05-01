@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ukiyo",
   description: "ukiyo, the all-in-one ai-powered building platform",
+  icons: { icon: "/ukiyo_planet_logo.png" },
 };
 
 export default function RootLayout({
