@@ -390,3 +390,145 @@ async def test_cleanup_expired_handoffs_deletes_old_rows(
     assert "OLDLLLLL" not in remaining
     assert "RECENTYY" in remaining
     assert "FRESHHHH" in remaining
+
+
+# --- GET /conversations/{id}/design (Phase 13 hydration) ------------------
+
+
+async def test_get_conversation_design_returns_design_with_versions(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    design, _version = await _seed_design_with_version(
+        db,
+        title="hydration test",
+        html="<!doctype html><html><body><p>v1</p></body></html>",
+    )
+    # Add a second version so the timeline assertion is meaningful.
+    v2 = DesignVersion(
+        design_id=design.id,
+        version_number=2,
+        html="<!doctype html><html><body><p>v2</p></body></html>",
+        prompt="bigger",
+        parent_version_id=design.current_version_id,
+    )
+    db.add(v2)
+    await db.flush()
+    design.current_version_id = v2.id
+    await db.commit()
+
+    resp = await client.get(f"/conversations/{design.conversation_id}/design")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert uuid.UUID(body["id"]) == design.id
+    assert uuid.UUID(body["conversation_id"]) == design.conversation_id
+    assert body["title"] == "hydration test"
+    assert uuid.UUID(body["current_version_id"]) == v2.id
+    assert isinstance(body["versions"], list)
+    assert len(body["versions"]) == 2
+    # Ordered by version_number ASC.
+    assert body["versions"][0]["version_number"] == 1
+    assert body["versions"][1]["version_number"] == 2
+    # HTML is inlined for v1's single-shot hydration shape.
+    assert "v1" in body["versions"][0]["html"]
+    assert "v2" in body["versions"][1]["html"]
+
+
+async def test_get_conversation_design_404_when_no_design(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """A conversation that has had only chat-surface turns (no canvas)
+    must 404 — the drawer treats this as "empty / not yet opened"."""
+    await ensure_dev_user(db)
+    conv = Conversation(user_id=DEV_USER_ID, title="chat-only")
+    db.add(conv)
+    await db.commit()
+
+    resp = await client.get(f"/conversations/{conv.id}/design")
+    assert resp.status_code == 404
+
+
+async def test_get_conversation_design_404_for_other_users_conversation(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    other_user = User(email="other-hydrate@local")
+    db.add(other_user)
+    await db.flush()
+    design, _ = await _seed_design_with_version(db, user_id=other_user.id)
+
+    resp = await client.get(f"/conversations/{design.conversation_id}/design")
+    assert resp.status_code == 404
+
+
+# --- PATCH /designs/{id} (Phase 13 revert) --------------------------------
+
+
+async def test_patch_design_sets_current_version_id(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    """Revert flips current_version_id but does not delete or re-parent
+    any version row — the DAG is preserved."""
+    design, v1 = await _seed_design_with_version(db, html="<html><body>v1</body></html>")
+    v2 = DesignVersion(
+        design_id=design.id,
+        version_number=2,
+        html="<html><body>v2</body></html>",
+        prompt="bigger",
+        parent_version_id=v1.id,
+    )
+    db.add(v2)
+    await db.flush()
+    design.current_version_id = v2.id
+    await db.commit()
+
+    resp = await client.patch(
+        f"/designs/{design.id}",
+        json={"current_version_id": str(v1.id)},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert uuid.UUID(body["current_version_id"]) == v1.id
+    # Both versions still in the timeline — revert must not delete.
+    assert len(body["versions"]) == 2
+
+    await db.refresh(design)
+    assert design.current_version_id == v1.id
+
+
+async def test_patch_design_422_for_version_in_other_design(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    design_a, _ = await _seed_design_with_version(db, title="a")
+    _design_b, version_b = await _seed_design_with_version(db, title="b")
+
+    resp = await client.patch(
+        f"/designs/{design_a.id}",
+        json={"current_version_id": str(version_b.id)},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_design_404_for_other_users_design(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    other_user = User(email="other-revert@local")
+    db.add(other_user)
+    await db.flush()
+    design, version = await _seed_design_with_version(db, user_id=other_user.id)
+
+    resp = await client.patch(
+        f"/designs/{design.id}",
+        json={"current_version_id": str(version.id)},
+    )
+    assert resp.status_code == 404
+
+
+async def test_patch_design_404_for_unknown_design(
+    client: AsyncClient, db: AsyncSession
+) -> None:
+    _design, version = await _seed_design_with_version(db)
+    resp = await client.patch(
+        f"/designs/{uuid.uuid4()}",
+        json={"current_version_id": str(version.id)},
+    )
+    assert resp.status_code == 404

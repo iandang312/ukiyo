@@ -15,31 +15,46 @@ export interface StreamHandlers {
   onError?: (error: unknown) => void;
 }
 
+// Phase 13: canvas-surface turns add `surface` and (for scoped edits)
+// `edit_scope_uid`. Defaults preserve the chat-only call sites — passing
+// no options behaves identically to the pre-canvas version of this fn.
+export interface StreamMessageOptions {
+  surface?: "chat" | "canvas";
+  editScopeUid?: number;
+}
+
 export async function streamMessage(
   conversationId: string,
   content: string,
   handlers: StreamHandlers,
+  options: StreamMessageOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
+  const body: Record<string, unknown> = { content };
+  if (options.surface) body.surface = options.surface;
+  if (options.editScopeUid !== undefined) {
+    body.edit_scope_uid = options.editScopeUid;
+  }
+
   try {
     const response = await fetch(
       `${API_BASE_URL}/conversations/${conversationId}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
         credentials: "include",
         signal,
       },
     );
     if (!response.ok) {
-      let body: unknown = null;
+      let parsed: unknown = null;
       try {
-        body = await response.json();
+        parsed = await response.json();
       } catch {
-        body = await response.text().catch(() => null);
+        parsed = await response.text().catch(() => null);
       }
-      throw new ApiError(response.status, body);
+      throw new ApiError(response.status, parsed);
     }
     await parseSseStream(response, (eventName, data) => {
       switch (eventName) {

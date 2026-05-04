@@ -1,4 +1,4 @@
-"""Design handoff endpoints (Phase 12).
+"""Design handoff endpoints (Phase 12) + design hydration / revert (Phase 13).
 
 `POST /designs/{design_id}/versions/{version_id}/handoffs` issues an opaque
 8-char code (10-min TTL, single-use) pinned to the version. Auth: session.
@@ -13,6 +13,17 @@ Rate limiting on `/handoffs/redeem` is implemented in-process — module-
 level rolling-window dict, no new dep. ~10/min and ~100/day per IP per
 CONTEXT.md decision #19. Single-process for v1; Phase 16 + a real prod
 deployment will revisit for distributed safety.
+
+Phase 13 adds:
+- `GET /conversations/{conversation_id}/design` — single-shot hydration for
+  the canvas drawer. Returns the (1:1) design + all versions inline so the
+  frontend doesn't paginate. 404 if no design has been opened on the
+  conversation yet. Owned by the route layer here rather than
+  conversations.py because it's design-shaped, not conversation-shaped.
+- `PATCH /designs/{design_id}` — flip `current_version_id` to revert the
+  active version. Editing afterwards still appends at the end of the
+  timeline (linear-UI-over-DAG-storage per CONTEXT.md decision #17 — the
+  parent_version_id gets set to whatever is current at edit time).
 """
 from __future__ import annotations
 
@@ -24,12 +35,13 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ukiyo_service.application.deps import get_current_user, get_db
 from ukiyo_service.infrastructure.db.models import (
+    Conversation,
     Design,
     DesignHandoff,
     DesignVersion,
@@ -63,6 +75,47 @@ class RedeemHandoffOut(BaseModel):
     version_number: int
     design_title: str | None
     design_id: uuid.UUID
+
+
+class DesignVersionOut(BaseModel):
+    """One row of the canvas drawer's version timeline. `html` is included
+    inline because the timeline lets the user revert without a follow-up
+    fetch — and because v1 hydrates everything in one round-trip per the
+    CONTEXT.md "single-shot hydration" pattern. If versions get heavy we
+    can split this into a metadata-only list + lazy `GET /versions/{id}`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    version_number: int
+    html: str
+    prompt: str | None
+    edit_scope_selector: str | None
+    parent_version_id: uuid.UUID | None
+    model_used: str | None
+    tokens_in: int | None
+    tokens_out: int | None
+    created_at: datetime
+
+
+class DesignOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    title: str | None
+    current_version_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    versions: list[DesignVersionOut]
+
+
+class DesignPatch(BaseModel):
+    """Phase 13 revert. Only `current_version_id` is mutable today —
+    `title` could land later but isn't part of v1 UX, so leaving it out
+    keeps the surface area small."""
+
+    current_version_id: uuid.UUID
 
 
 # --- in-process rate limiter ---------------------------------------------
@@ -302,6 +355,156 @@ async def redeem_handoff(
         version_number=version.version_number,
         design_title=design.title,
         design_id=design.id,
+    )
+
+
+# --- Phase 13: hydration + revert ----------------------------------------
+
+
+@router.get(
+    "/conversations/{conversation_id}/design",
+    response_model=DesignOut,
+)
+async def get_conversation_design(
+    conversation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DesignOut:
+    """Single-shot hydration for the canvas drawer.
+
+    v1's 1:1 design-per-conversation invariant (CONTEXT.md decision #13)
+    means the frontend doesn't need a separate "list designs" endpoint —
+    the canvas drawer always opens against the current conversation's one
+    design. Returns 404 distinctly when:
+      - the conversation isn't yours / doesn't exist
+      - the conversation exists but no canvas turn has run on it yet
+    Both are 404 because exposing "this conversation exists but has no
+    design" leaks little — the frontend treats both as "drawer is empty".
+    Versions come back ordered by version_number ASC so the timeline
+    renders top-to-bottom in chronological order without client sorting.
+    """
+    conv = (
+        await db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if conv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="conversation not found",
+        )
+
+    design = (
+        await db.execute(
+            select(Design).where(Design.conversation_id == conversation_id)
+        )
+    ).scalar_one_or_none()
+    if design is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="no design on this conversation yet",
+        )
+
+    versions = list(
+        (
+            await db.execute(
+                select(DesignVersion)
+                .where(DesignVersion.design_id == design.id)
+                .order_by(DesignVersion.version_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return DesignOut(
+        id=design.id,
+        conversation_id=design.conversation_id,
+        title=design.title,
+        current_version_id=design.current_version_id,
+        created_at=design.created_at,
+        updated_at=design.updated_at,
+        versions=[DesignVersionOut.model_validate(v) for v in versions],
+    )
+
+
+@router.patch(
+    "/designs/{design_id}",
+    response_model=DesignOut,
+)
+async def patch_design(
+    design_id: uuid.UUID,
+    body: DesignPatch,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DesignOut:
+    """Set `current_version_id` to revert the active version.
+
+    The DAG is preserved (we only touch the pointer, never delete or
+    re-parent versions). When the user edits after a revert, the canvas
+    branch in messages.py reads `design.current_version_id` to decide
+    `parent_version_id` for the new version — so a forked version arrives
+    with the correct DAG parentage but still appears at the end of the
+    linear timeline (CONTEXT.md decision #17).
+    """
+    design = (
+        await db.execute(
+            select(Design).where(
+                Design.id == design_id, Design.user_id == user.id
+            )
+        )
+    ).scalar_one_or_none()
+    if design is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="design not found",
+        )
+
+    target = (
+        await db.execute(
+            select(DesignVersion).where(
+                DesignVersion.id == body.current_version_id,
+                DesignVersion.design_id == design_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        # 422 (not 404) — the caller asked for a real, structured action
+        # but referenced a version that doesn't belong to this design.
+        # Differentiating this from the 404 above lets the frontend tell
+        # "design vanished" from "tried to revert to wrong version".
+        raise HTTPException(
+            status_code=422,
+            detail="version does not belong to this design",
+        )
+
+    design.current_version_id = target.id
+    await db.commit()
+    await db.refresh(design)
+
+    versions = list(
+        (
+            await db.execute(
+                select(DesignVersion)
+                .where(DesignVersion.design_id == design.id)
+                .order_by(DesignVersion.version_number.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return DesignOut(
+        id=design.id,
+        conversation_id=design.conversation_id,
+        title=design.title,
+        current_version_id=design.current_version_id,
+        created_at=design.created_at,
+        updated_at=design.updated_at,
+        versions=[DesignVersionOut.model_validate(v) for v in versions],
     )
 
 
