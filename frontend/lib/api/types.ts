@@ -44,6 +44,12 @@ export interface DoneEvent {
   latency_ms: number;
 }
 
+export interface StreamErrorEvent {
+  provider: "openai" | "anthropic" | "google";
+  code: string;
+  user_message: string;
+}
+
 export interface ModelsResponse {
   generalist: string;
   buckets: Record<string, string>;

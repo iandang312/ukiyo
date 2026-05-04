@@ -9,7 +9,6 @@ export interface ChatMessage {
   content: string;
   model?: string | null;
   isStreaming?: boolean;
-  error?: string | null;
 }
 
 interface MessageProps {
@@ -46,11 +45,6 @@ export function Message({ message }: MessageProps) {
       ) : (
         <div className="text-[15px] leading-[1.7] text-white">
           <Streamdown>{message.content}</Streamdown>
-        </div>
-      )}
-      {message.error && (
-        <div role="alert" className="text-xs text-zinc-500">
-          {message.error}
         </div>
       )}
     </div>

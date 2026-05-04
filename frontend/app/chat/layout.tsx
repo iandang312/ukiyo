@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { ChatLayoutContext } from "@/components/chat/context";
 import type { ChatMessage } from "@/components/chat/message";
 import { Sidebar } from "@/components/chat/sidebar";
 import { TopStrip } from "@/components/chat/top-strip";
+import { Toaster } from "@/components/ui/sonner";
 import { ApiError } from "@/lib/api/client";
 import {
   createConversation,
@@ -172,6 +174,13 @@ export default function ChatLayout({
       setMessages(id, (prev) => [...prev, assistantMsg]);
       setStreamingByConv((prev) => ({ ...prev, [id]: true }));
 
+      const dropAssistantRow = () => {
+        setMessages(id, (prev) =>
+          prev.filter((m) => m.id !== tempAssistantId),
+        );
+        setStreamingByConv((prev) => ({ ...prev, [id]: false }));
+      };
+
       await streamMessage(id, content, {
         onMeta: (meta) => {
           setCurrentModel(meta.model);
@@ -201,20 +210,15 @@ export default function ChatLayout({
           setStreamingByConv((prev) => ({ ...prev, [id]: false }));
           refreshConversations();
         },
+        onStreamError: (event) => {
+          console.error("Provider error", event.provider, event.code);
+          dropAssistantRow();
+          toast.error(event.user_message);
+        },
         onError: (err) => {
           console.error("Stream failed", err);
-          setMessages(id, (prev) =>
-            prev.map((m) =>
-              m.id === tempAssistantId
-                ? {
-                    ...m,
-                    isStreaming: false,
-                    error: "Failed to load response. Try again.",
-                  }
-                : m,
-            ),
-          );
-          setStreamingByConv((prev) => ({ ...prev, [id]: false }));
+          dropAssistantRow();
+          toast.error("Connection failed. Try again.");
         },
       });
     },
@@ -304,6 +308,7 @@ export default function ChatLayout({
           {children}
         </main>
       </div>
+      <Toaster />
     </ChatLayoutContext.Provider>
   );
 }

@@ -1,11 +1,17 @@
 import { API_BASE_URL, ApiError } from "./client";
 import { parseSseStream } from "./sse";
-import type { DeltaEvent, DoneEvent, MetaEvent } from "./types";
+import type {
+  DeltaEvent,
+  DoneEvent,
+  MetaEvent,
+  StreamErrorEvent,
+} from "./types";
 
 export interface StreamHandlers {
   onMeta?: (meta: MetaEvent) => void;
   onDelta?: (delta: DeltaEvent) => void;
   onDone?: (done: DoneEvent) => void;
+  onStreamError?: (event: StreamErrorEvent) => void;
   onError?: (error: unknown) => void;
 }
 
@@ -46,8 +52,10 @@ export async function streamMessage(
         case "done":
           handlers.onDone?.(data as DoneEvent);
           break;
+        case "error":
+          handlers.onStreamError?.(data as StreamErrorEvent);
+          break;
         default:
-          // ignore unknown events; Phase 11 may add `error`
           break;
       }
     });
