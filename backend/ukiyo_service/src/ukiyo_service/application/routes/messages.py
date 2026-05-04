@@ -8,7 +8,10 @@ the prior intent vector to skip classification on conversational
 follow-ups; Phase 8 adds a manual pin branch that bypasses both. Phase 9
 adds a daily token-cap precheck before any paid call; Phase 10 wraps the
 provider stream loop so failures emit a clean SSE `error` event and
-persist the user message only (no partial assistant row).
+persist the user message only (no partial assistant row). Phase 12 adds
+a `surface == 'canvas'` short-circuit above the routing tree — canvas
+turns skip embed / classify / hysteresis entirely and use the design
+service to generate + persist a new design version.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -26,12 +30,24 @@ from starlette.responses import StreamingResponse
 
 from ukiyo_service.application.deps import get_current_user, get_db
 from ukiyo_service.config import get_settings
+from ukiyo_service.domain.design import (
+    CanvasDelta,
+    CanvasDone,
+    generate_full,
+    generate_scoped,
+)
 from ukiyo_service.domain.routing import (
     classify_from_embedding,
     select_model,
     should_reuse_prior_model,
 )
-from ukiyo_service.infrastructure.db.models import Conversation, Message, User
+from ukiyo_service.infrastructure.db.models import (
+    Conversation,
+    Design,
+    DesignVersion,
+    Message,
+    User,
+)
 from ukiyo_service.infrastructure.embeddings import embed
 from ukiyo_service.infrastructure.llm import (
     Message as LLMMessage,
@@ -45,6 +61,37 @@ router = APIRouter(prefix="/conversations", tags=["messages"])
 
 class MessageIn(BaseModel):
     content: str
+    # Phase 12: 'chat' (default) preserves the bucket-routing flow; 'canvas'
+    # short-circuits routing and dispatches to the design service.
+    surface: Literal["chat", "canvas"] = "chat"
+    # Only meaningful when surface=='canvas'. Present → scoped subtree edit
+    # against the design's current_version. Absent → full-doc generation.
+    edit_scope_uid: int | None = None
+
+
+_BUILD_VERBS: tuple[str, ...] = (
+    "build", "make", "design", "create", "mock up", "wireframe",
+)
+_UI_NOUNS: tuple[str, ...] = (
+    "page", "card", "layout", "dashboard", "form", "landing",
+    "component", "hero", "nav", "sidebar", "modal",
+)
+
+
+def _should_promote_to_canvas(
+    prompt: str, bucket: str | None, confidence: float | None
+) -> bool:
+    """Build-request heuristic. Only fires on chat-surface turns where the
+    top bucket is `design` with confidence >= 0.65 AND the prompt contains
+    both a build verb and a UI noun. The route attaches `promote_to_canvas:
+    true` to the meta event when this is true; the field is omitted
+    otherwise (UI checks for presence, not a `false` value)."""
+    if bucket != "design" or confidence is None or confidence < 0.65:
+        return False
+    lowered = prompt.lower()
+    return any(v in lowered for v in _BUILD_VERBS) and any(
+        n in lowered for n in _UI_NOUNS
+    )
 
 
 def _sse_event(name: str, data: dict[str, object]) -> bytes:
@@ -193,8 +240,23 @@ async def post_message(
             },
         )
 
-    # Routing decision tree (chat surface — Phase 12 will add a
-    # `surface == 'canvas'` short-circuit above this block):
+    # Phase 12: canvas-surface short-circuit. Skips embed + classify +
+    # hysteresis entirely (CONTEXT.md decision #15). Lazy-creates the
+    # design row, dispatches to generate_full or generate_scoped, and
+    # persists user/assistant messages with the new design_version_id on
+    # the assistant row. last_intent_* is intentionally not touched —
+    # canvas activity is implicitly design-bucket and would mis-bias the
+    # next chat-mode turn's hysteresis check.
+    if body.surface == "canvas":
+        return await _handle_canvas_turn(
+            conversation=conversation,
+            body=body,
+            db=db,
+            user_created_at=user_created_at,
+            started=started,
+        )
+
+    # Routing decision tree (chat surface):
     #
     #   1. Pinned model    -> use it; skip embed + classify + hysteresis update.
     #   2. Hysteresis hit  -> reuse prior model; skip classify; still update
@@ -260,15 +322,18 @@ async def post_message(
     provider = get_provider(model)
 
     async def event_stream() -> AsyncIterator[bytes]:
-        yield _sse_event(
-            "meta",
-            {
-                "surface": "chat",
-                "model": model,
-                "bucket": bucket,
-                "confidence": confidence,
-            },
-        )
+        meta_payload: dict[str, object] = {
+            "surface": "chat",
+            "model": model,
+            "bucket": bucket,
+            "confidence": confidence,
+        }
+        # Phase 12 build-request promotion: attach `promote_to_canvas: true`
+        # only when both heuristics fire (UI checks for presence). Cannot
+        # fire on pinned/hysteresis paths because `bucket` is None there.
+        if _should_promote_to_canvas(body.content, bucket, confidence):
+            meta_payload["promote_to_canvas"] = True
+        yield _sse_event("meta", meta_payload)
 
         # Build the user_msg up front so the Phase 10 error path can persist
         # it without rebuilding state. The assistant row is only built in the
@@ -332,8 +397,9 @@ async def post_message(
         )
         db.add_all([user_msg, assistant_msg])
 
-        # TODO(phase-12): gate this update on surface == 'chat'. Canvas turns
-        # must not poison hysteresis with implicitly-design intent vectors.
+        # Canvas turns short-circuit before this branch (see the
+        # `body.surface == 'canvas'` block above), so reaching here implies
+        # surface=='chat' and the hysteresis update is safe to apply.
         if prompt_vec is not None:
             # Pinned turns leave last_intent_* untouched (prompt_vec is None
             # because we never embedded) so re-enabling auto-route doesn't
@@ -359,6 +425,227 @@ async def post_message(
                 "tokens_out": tokens_out,
                 "cost_usd": str(cost),
                 "latency_ms": latency_ms,
+            },
+        )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# --- Phase 12: canvas-surface handler -------------------------------------
+
+
+async def _get_or_create_design(
+    db: AsyncSession, conversation: Conversation
+) -> Design:
+    """1:1 design per conversation in v1 — lazily created on the first
+    canvas turn. Future: drop the unique-by-conversation constraint if we
+    want multiple designs per thread."""
+    stmt = select(Design).where(Design.conversation_id == conversation.id)
+    existing = (await db.execute(stmt)).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    design = Design(
+        conversation_id=conversation.id,
+        user_id=conversation.user_id,
+    )
+    db.add(design)
+    await db.flush()
+    return design
+
+
+async def _handle_canvas_turn(
+    *,
+    conversation: Conversation,
+    body: MessageIn,
+    db: AsyncSession,
+    user_created_at: datetime,
+    started: float,
+) -> StreamingResponse:
+    """Canvas-surface branch. No embed, no classify, no hysteresis read or
+    write. Lazy-creates the design row. Dispatches to generate_full or
+    generate_scoped based on `edit_scope_uid`. Persists user/assistant
+    rows in one transaction with the new design_version_id on the
+    assistant row."""
+    settings = get_settings()
+    model = settings.BUCKET_MODEL_MAP["design"]
+    provider = get_provider(model)
+    conversation_id = conversation.id
+
+    design = await _get_or_create_design(db, conversation)
+
+    current_version: DesignVersion | None = None
+    if design.current_version_id is not None:
+        current_version = (
+            await db.execute(
+                select(DesignVersion).where(
+                    DesignVersion.id == design.current_version_id
+                )
+            )
+        ).scalar_one_or_none()
+
+    # Decide dispatch + meta event preview values up front. The route owns
+    # the meta payload — the service computes parent_version_id /
+    # version_number again at persist time (single source of truth) but
+    # the values match because no other writer touches this design within
+    # the request.
+    is_scoped_edit = body.edit_scope_uid is not None
+    if is_scoped_edit and current_version is None:
+        # Can't scope-edit a non-existent design. Reject before opening
+        # the SSE stream so the frontend gets a clean JSON error.
+        raise HTTPException(
+            status_code=422,
+            detail="cannot scope-edit before a full version exists",
+        )
+
+    parent_version_id = (
+        current_version.id if current_version is not None else None
+    )
+    next_version_stmt = select(
+        func.coalesce(func.max(DesignVersion.version_number), 0)
+    ).where(DesignVersion.design_id == design.id)
+    next_version_number = int(
+        (await db.execute(next_version_stmt)).scalar_one()
+    ) + 1
+
+    # Build LLM history. Per CONTEXT.md "prior turns (chat + canvas
+    # interleaved is fine — model sees the design context as needed)".
+    # Including assistant canvas content (full HTML) is heavy but the
+    # cost cap will catch runaways; v1 prefers correctness over savings.
+    history_stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+    )
+    prior = list((await db.execute(history_stmt)).scalars().all())
+    history: list[LLMMessage] = [
+        LLMMessage(role=m.role, content=m.content) for m in prior  # type: ignore[arg-type]
+    ]
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        yield _sse_event(
+            "meta",
+            {
+                "surface": "canvas",
+                "model": model,
+                "bucket": "design",
+                "design_id": str(design.id),
+                "version_id": None,
+                "parent_version_id": (
+                    str(parent_version_id) if parent_version_id else None
+                ),
+                "version_number": next_version_number,
+                "is_scoped_edit": is_scoped_edit,
+            },
+        )
+
+        user_msg = Message(
+            conversation_id=conversation_id,
+            role="user",
+            content=body.content,
+            created_at=user_created_at,
+        )
+
+        new_version: DesignVersion | None = None
+        tokens_in = 0
+        tokens_out = 0
+        assistant_content_parts: list[str] = []
+
+        try:
+            if is_scoped_edit:
+                assert body.edit_scope_uid is not None and current_version is not None
+                gen = generate_scoped(
+                    db=db,
+                    design=design,
+                    current_version=current_version,
+                    edit_scope_uid=body.edit_scope_uid,
+                    prompt=body.content,
+                    provider=provider,
+                    model=model,
+                    history=history,
+                )
+            else:
+                gen = generate_full(
+                    db=db,
+                    design=design,
+                    prompt=body.content,
+                    provider=provider,
+                    model=model,
+                    history=history,
+                )
+            async for ev in gen:
+                if isinstance(ev, CanvasDelta):
+                    assistant_content_parts.append(ev.text)
+                    yield _sse_event("delta", {"content": ev.text})
+                elif isinstance(ev, CanvasDone):
+                    new_version = ev.version
+                    tokens_in = ev.tokens_in
+                    tokens_out = ev.tokens_out
+        except Exception as exc:
+            # Same Phase 10 contract: emit clean SSE error, persist the
+            # user message only, no design_version row, no hysteresis
+            # update (canvas doesn't update it anyway), no updated_at
+            # bump on the conversation.
+            await db.rollback()
+            code, user_message = _classify_provider_error(exc)
+            yield _sse_event(
+                "error",
+                {
+                    "provider": _provider_for_model(model),
+                    "code": code,
+                    "user_message": user_message,
+                },
+            )
+            db.add(user_msg)
+            await db.commit()
+            return
+
+        assert new_version is not None, (
+            "canvas service must yield exactly one CanvasDone on success"
+        )
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        cost = cost_usd(model, tokens_in, tokens_out)
+
+        # The assistant message's text content for canvas turns is the raw
+        # streamed HTML — it's what the model produced and it's what the
+        # iframe will render in v1. Keeping it in the row also means
+        # `_used_tokens_today` and chat-history reconstruction (for future
+        # canvas turns within this conversation) work without a join.
+        assistant_msg = Message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content="".join(assistant_content_parts),
+            model_used=model,
+            bucket_scores={},  # canvas turns don't classify
+            intent_confidence=None,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            design_version_id=new_version.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add_all([user_msg, assistant_msg])
+
+        # Bump the conversation's updated_at so canvas activity surfaces
+        # the conversation in the sidebar — even though we deliberately do
+        # NOT touch last_intent_*.
+        await db.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(updated_at=func.now())
+        )
+        await db.commit()
+
+        yield _sse_event(
+            "done",
+            {
+                "message_id": str(assistant_msg.id),
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "cost_usd": str(cost),
+                "latency_ms": latency_ms,
+                "version_id": str(new_version.id),
             },
         )
 
