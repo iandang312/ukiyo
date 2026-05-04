@@ -108,6 +108,11 @@ class Message(Base):
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    design_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("design_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -133,4 +138,114 @@ class BucketExemplar(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
         Vector(EMBEDDING_DIM), nullable=False
+    )
+
+
+class Design(Base):
+    __tablename__ = "designs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Circular FK with design_versions: use_alter defers the constraint so
+    # create_all can build both tables before applying it.
+    current_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "design_versions.id",
+            use_alter=True,
+            name="fk_designs_current_version_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_designs_conversation_id_updated_at", "conversation_id", "updated_at"),
+        Index("ix_designs_user_id", "user_id"),
+    )
+
+
+class DesignVersion(Base):
+    __tablename__ = "design_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    design_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("designs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    parent_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("design_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    html: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edit_scope_selector: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_design_versions_design_id_created_at",
+            "design_id",
+            "created_at",
+        ),
+    )
+
+
+class DesignHandoff(Base):
+    __tablename__ = "design_handoffs"
+
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    design_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("design_versions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_design_handoffs_expires_at", "expires_at"),
     )

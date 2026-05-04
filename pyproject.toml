@@ -19,6 +19,7 @@ dependencies = [
   "anthropic",
   "google-genai",
   "pydantic-settings",
+  "selectolax>=0.3,<0.4",
 ]
 
 [project.optional-dependencies]
