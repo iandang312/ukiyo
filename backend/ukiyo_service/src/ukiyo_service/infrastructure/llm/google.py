@@ -4,6 +4,12 @@ google-genai uses role="user"|"model" (not "assistant") and carries
 `system_instruction` in a separate config object. usage_metadata on each
 streamed chunk is cumulative — we keep the latest values and emit one merged
 trailing Chunk after the iterator drains.
+
+Every call attaches the `google_search` grounding tool. Today Gemini is only
+used by the research bucket (`gemini-2.5-flash`), where live web grounding +
+inline citations is the entire reason we picked Gemini in the first place.
+If Gemini is ever assigned to a non-research bucket and grounding becomes
+unwanted, parameterize this — but don't pre-empt the YAGNI tax.
 """
 from __future__ import annotations
 
@@ -91,6 +97,7 @@ class GoogleProvider:
         config = types.GenerateContentConfig(
             system_instruction=system,
             max_output_tokens=max_tokens,
+            tools=[types.Tool(google_search=types.GoogleSearch())],
             **opts,
         )
         finish: FinishReason | None = None

@@ -3,7 +3,7 @@
 Recognized prefixes:
 - gpt-, o1-, o3-  -> OpenAI
 - claude-         -> Anthropic
-- gemini-         -> Google
+- gemini-         -> Google (always with `google_search` grounding; see google.py)
 
 Provider instances are cached per-process so SDK clients (and their connection
 pools) are reused across requests. Provider modules are imported lazily so the

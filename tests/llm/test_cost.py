@@ -26,6 +26,13 @@ def test_gemini_pricing() -> None:
     assert cost_usd("gemini-2.5-pro", 1_000_000, 1_000_000) == Decimal("11.250000")
 
 
+def test_gemini_flash_pricing() -> None:
+    # 1M in + 1M out at $0.30 / $2.50 = $2.80 (token cost only — Google's
+    # google_search grounding fee is not modeled here; first 1500 grounded
+    # requests/day per project are free, then $35 / 1k after).
+    assert cost_usd("gemini-2.5-flash", 1_000_000, 1_000_000) == Decimal("2.800000")
+
+
 def test_zero_tokens_zero_cost() -> None:
     assert cost_usd("claude-sonnet-4-6", 0, 0) == Decimal("0.000000")
 

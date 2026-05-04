@@ -16,6 +16,12 @@ _PRICES: dict[str, tuple[Decimal, Decimal]] = {
     "claude-sonnet-4-6": (Decimal("3.00"), Decimal("15.00")),
     "gpt-4o": (Decimal("2.50"), Decimal("10.00")),
     "gemini-2.5-pro": (Decimal("1.25"), Decimal("10.00")),
+    # Gemini 2.5 Flash backs the research bucket. Token prices only — the
+    # `google_search` grounding tool is billed separately (free first
+    # 1500 requests/day per project, then $35 / 1k requests) and is not
+    # modeled here. Real research-bucket cost is slightly higher than what
+    # `cost_usd` reports once the daily free tier is exhausted.
+    "gemini-2.5-flash": (Decimal("0.30"), Decimal("2.50")),
 }
 
 _MILLION = Decimal("1000000")

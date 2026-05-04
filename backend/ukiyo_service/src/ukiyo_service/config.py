@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, field_validator
@@ -27,7 +28,12 @@ class Settings(BaseSettings):
         default_factory=lambda: {
             "coding": "claude-sonnet-4-6",
             "design": "gpt-4o",
-            "research": "gemini-2.5-pro",
+            # Gemini 2.5 Flash with the google_search grounding tool — see
+            # Phase 6.5. Cheap (~$0.30/$2.50 per M tokens), grounding is free
+            # for the first 1500 requests/day per Google project, citations
+            # arrive in the response. GoogleProvider attaches the tool
+            # unconditionally; needs GOOGLE_API_KEY in .env.
+            "research": "gemini-2.5-flash",
         }
     )
 

@@ -78,3 +78,22 @@ async def test_google_stream_is_well_formed() -> None:
         )
     ]
     _assert_well_formed_stream(chunks)
+
+
+@pytest.mark.skipif(not _settings.GOOGLE_API_KEY, reason="GOOGLE_API_KEY not set")
+async def test_gemini_flash_grounded_stream_is_well_formed() -> None:
+    """Gemini 2.5 Flash with always-on `google_search` grounding (Phase 6.5).
+
+    Uses a prompt that should pull live web data so the grounded path is
+    exercised end-to-end, not just the bare chat completion call.
+    """
+    provider = get_provider("gemini-2.5-flash")
+    chunks = [
+        c
+        async for c in provider.stream(
+            [Message(role="user", content="What is the current Bitcoin price in USD? Answer in one sentence.")],
+            model="gemini-2.5-flash",
+            max_tokens=120,
+        )
+    ]
+    _assert_well_formed_stream(chunks)
