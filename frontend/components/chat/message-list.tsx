@@ -15,7 +15,12 @@ export function MessageList({ messages }: MessageListProps) {
       initial="instant"
     >
       <StickToBottom.Content className="flex flex-col gap-10 px-6 py-8">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-10">
+        <div
+          role="log"
+          aria-label="Conversation"
+          aria-live="off"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-10"
+        >
           {messages.map((m) => (
             <Message key={m.id} message={m} />
           ))}

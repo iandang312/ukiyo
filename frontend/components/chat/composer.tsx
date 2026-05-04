@@ -29,6 +29,7 @@ export function Composer({
 }: ComposerProps) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const prevDisabledRef = useRef(disabled);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -37,6 +38,13 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
     el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden";
   }, [text]);
+
+  useEffect(() => {
+    if (prevDisabledRef.current && !disabled) {
+      textareaRef.current?.focus();
+    }
+    prevDisabledRef.current = disabled;
+  }, [disabled]);
 
   const submit = () => {
     const trimmed = text.trim();
@@ -49,6 +57,11 @@ export function Composer({
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
+      return;
+    }
+    if (e.key === "Escape" && text.length > 0) {
+      e.preventDefault();
+      setText("");
     }
   };
 
@@ -63,6 +76,7 @@ export function Composer({
     <div className="px-6 pb-6">
       <form
         onSubmit={handleFormSubmit}
+        aria-busy={disabled || undefined}
         className="mx-auto w-full max-w-3xl"
       >
         <div
@@ -79,6 +93,7 @@ export function Composer({
             disabled={disabled}
             autoFocus={autoFocus}
             rows={1}
+            aria-label="Message"
             placeholder={placeholder}
             className={cn(
               "flex-1 resize-none border-0 bg-transparent text-[15px] leading-6 text-white placeholder:text-zinc-600",

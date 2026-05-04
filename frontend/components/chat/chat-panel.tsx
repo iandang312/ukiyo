@@ -42,11 +42,7 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
   }, [conversationId, messages, setCurrentModel]);
 
   if (conversationId && messages === undefined) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-zinc-600">
-        Loading…
-      </div>
-    );
+    return <HistorySkeleton />;
   }
 
   const list = messages ?? [];
@@ -68,6 +64,29 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
         disabled={streaming}
         autoFocus
       />
+    </div>
+  );
+}
+
+function HistorySkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading conversation"
+      className="min-h-0 flex-1 overflow-hidden px-6 py-8"
+    >
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="flex flex-col gap-2">
+            <div className="h-3 w-16 animate-pulse rounded bg-zinc-900" />
+            <div className="flex flex-col gap-2">
+              <div className="h-4 w-full animate-pulse rounded bg-zinc-900" />
+              <div className="h-4 w-11/12 animate-pulse rounded bg-zinc-800" />
+              <div className="h-4 w-8/12 animate-pulse rounded bg-zinc-900" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

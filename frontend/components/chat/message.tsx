@@ -22,21 +22,36 @@ export function Message({ message }: MessageProps) {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+      <div
+        aria-hidden="true"
+        className="text-xs uppercase tracking-wide text-zinc-500"
+      >
         {label}
       </div>
-      <div className="text-[15px] leading-[1.7] text-white">
-        {isUser ? (
+      {isUser ? (
+        <div className="text-[15px] leading-[1.7] text-white">
           <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <>
-            <Streamdown>{message.content}</Streamdown>
-            {message.isStreaming && <StreamingCursor />}
-          </>
-        )}
-      </div>
+        </div>
+      ) : message.isStreaming ? (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="false"
+          aria-label={`${label} response`}
+          className="text-[15px] leading-[1.7] text-white"
+        >
+          <Streamdown>{message.content}</Streamdown>
+          <StreamingCursor />
+        </div>
+      ) : (
+        <div className="text-[15px] leading-[1.7] text-white">
+          <Streamdown>{message.content}</Streamdown>
+        </div>
+      )}
       {message.error && (
-        <div className="text-xs text-zinc-500">{message.error}</div>
+        <div role="alert" className="text-xs text-zinc-500">
+          {message.error}
+        </div>
       )}
     </div>
   );
