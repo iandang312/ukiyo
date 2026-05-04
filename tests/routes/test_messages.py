@@ -134,9 +134,13 @@ async def test_post_message_persists_user_and_assistant_in_one_transaction(
     assert rows[1]["tokens_out"] == 8
     assert rows[1]["cost_usd"] is not None
     assert rows[1]["latency_ms"] is not None
-    # Single-transaction guarantee: bucket fields stay null this phase.
-    assert rows[1]["bucket_scores"] is None
-    assert rows[1]["intent_confidence"] is None
+    # Phase 6: classify is stubbed to {} in conftest, so select_model returns
+    # the empty-bucket fallback. The DB keeps the raw shape (empty dict, 0.0)
+    # — the meta event normalizes confidence to None on fallback, but persisted
+    # rows preserve the floor score so analytics can distinguish "no buckets"
+    # from "buckets all sub-floor".
+    assert rows[1]["bucket_scores"] == {}
+    assert rows[1]["intent_confidence"] == 0.0
 
 
 async def test_post_message_404_for_unknown_conversation(

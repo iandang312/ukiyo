@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ukiyo_service.application.deps import get_db
 from ukiyo_service.application.main import app
 from ukiyo_service.infrastructure.db.session import ensure_dev_user
+
+
+@pytest.fixture(autouse=True)
+def _stub_classify_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default route tests to an empty classifier so they never call OpenAI.
+
+    `classify()` embeds the prompt before any DB lookup, so without this stub
+    every route test that POSTs a message would hit the embeddings API. Tests
+    that need specific bucket scores override this with their own
+    `monkeypatch.setattr(...)` — the later patch wins.
+    """
+
+    async def _empty(prompt: str, session: Any) -> dict[str, float]:
+        return {}
+
+    monkeypatch.setattr(
+        "ukiyo_service.application.routes.messages.classify",
+        _empty,
+    )
 
 
 @pytest_asyncio.fixture

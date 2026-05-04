@@ -1,11 +1,10 @@
-"""SSE chat endpoint (Phase 3).
+"""SSE chat endpoint.
 
 POST /conversations/{id}/messages streams the assistant response via SSE
 and, on success, persists the user message and the assistant message in a
-single transaction together with tokens / cost / latency. Phase 6 will
-swap the hard-coded model for selector output without touching the route
-shape — the meta event already carries placeholder `bucket` / `confidence`
-fields for that wave.
+single transaction together with tokens / cost / latency. Phase 6 wires the
+classifier + selector into the request path: the chosen model, bucket, and
+confidence ride the first SSE event and persist on the assistant row.
 """
 from __future__ import annotations
 
@@ -22,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from ukiyo_service.application.deps import get_current_user, get_db
-from ukiyo_service.config import get_settings
+from ukiyo_service.domain.routing import classify, select_model
 from ukiyo_service.infrastructure.db.models import Conversation, Message, User
 from ukiyo_service.infrastructure.llm import (
     Message as LLMMessage,
@@ -54,8 +53,6 @@ async def post_message(
     # would otherwise tie both rows to the same transaction-start timestamp,
     # making `ORDER BY created_at` non-deterministic between user and assistant.
     user_created_at = datetime.now(timezone.utc)
-    settings = get_settings()
-    model = settings.GENERALIST_MODEL
 
     conv_stmt = select(Conversation).where(
         Conversation.id == conversation_id,
@@ -67,6 +64,16 @@ async def post_message(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="conversation not found",
         )
+
+    # Phase 8 will replace this guard with `if not auto_route_enabled or
+    # pinned_model: use pinned_model`. Keeping the shape so that branch slots
+    # in cleanly. Today the else branch is unreachable — auto_route_enabled
+    # defaults true and no endpoint flips it.
+    bucket_scores: dict[str, float] = {}
+    if conversation.auto_route_enabled and not conversation.pinned_model:
+        bucket_scores = await classify(body.content, db)
+    choice = select_model(bucket_scores)
+    model = choice.model
 
     history_stmt = (
         select(Message)
@@ -81,14 +88,20 @@ async def post_message(
 
     provider = get_provider(model)
 
+    # On generalist fallback (no bucket cleared the floor) the meta event
+    # reports confidence as null so the UI badge reads as "no routing decision"
+    # rather than a misleading sub-floor float. The DB still keeps the raw
+    # score on the row for analytics.
+    meta_confidence = choice.confidence if choice.bucket is not None else None
+
     async def event_stream() -> AsyncIterator[bytes]:
         yield _sse_event(
             "meta",
             {
                 "surface": "chat",
                 "model": model,
-                "bucket": None,
-                "confidence": None,
+                "bucket": choice.bucket,
+                "confidence": meta_confidence,
             },
         )
 
@@ -119,6 +132,8 @@ async def post_message(
             role="assistant",
             content="".join(assistant_content_parts),
             model_used=model,
+            bucket_scores=choice.bucket_scores,
+            intent_confidence=choice.confidence,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=cost,
@@ -126,6 +141,9 @@ async def post_message(
             created_at=datetime.now(timezone.utc),
         )
         db.add_all([user_msg, assistant_msg])
+        # TODO(phase-7): update conversation.last_intent_vector +
+        # last_intent_bucket here so hysteresis can short-circuit the next
+        # turn's classify call.
         await db.execute(
             update(Conversation)
             .where(Conversation.id == conversation_id)
