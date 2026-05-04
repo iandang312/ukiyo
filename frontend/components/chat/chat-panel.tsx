@@ -52,7 +52,7 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       {isEmpty ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-          <h1 className="text-2xl font-light tracking-tight text-zinc-400">
+          <h1 className="text-2xl font-light tracking-tight text-white">
             What can I help with?
           </h1>
         </div>
