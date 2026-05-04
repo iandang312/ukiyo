@@ -43,3 +43,13 @@ export interface DoneEvent {
   cost_usd: string;
   latency_ms: number;
 }
+
+export interface ModelsResponse {
+  generalist: string;
+  buckets: Record<string, string>;
+}
+
+export interface ConversationPatch {
+  pinned_model?: string | null;
+  auto_route_enabled?: boolean;
+}

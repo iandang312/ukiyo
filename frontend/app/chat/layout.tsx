@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { ChatLayoutContext } from "@/components/chat/context";
 import type { ChatMessage } from "@/components/chat/message";
 import { Sidebar } from "@/components/chat/sidebar";
@@ -11,9 +11,26 @@ import {
   createConversation,
   getMessages as fetchMessages,
   listConversations,
+  listModels,
+  patchConversation as patchConversationApi,
 } from "@/lib/api/conversations";
 import { streamMessage } from "@/lib/api/messages";
-import type { Conversation } from "@/lib/api/types";
+import type {
+  Conversation,
+  ConversationPatch,
+  ModelsResponse,
+} from "@/lib/api/types";
+
+// Used when GET /models fails. Mirrors today's BUCKET_MODEL_MAP defaults so
+// the picker still renders something sane offline.
+const FALLBACK_MODELS: ModelsResponse = {
+  generalist: "claude-sonnet-4-6",
+  buckets: {
+    coding: "claude-sonnet-4-6",
+    design: "gpt-4o",
+    research: "gemini-2.5-flash",
+  },
+};
 
 export default function ChatLayout({
   children,
@@ -21,10 +38,14 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const params = useParams<{ id?: string }>();
+  const currentId =
+    typeof params?.id === "string" ? params.id : null;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelsResponse | null>(null);
   const [messagesByConv, setMessagesByConv] = useState<
     Record<string, ChatMessage[]>
   >({});
@@ -33,6 +54,10 @@ export default function ChatLayout({
   >({});
 
   const inflightHistoryRef = useRef<Set<string>>(new Set());
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   const refreshConversations = useCallback(async () => {
     try {
@@ -48,6 +73,21 @@ export default function ChatLayout({
   useEffect(() => {
     refreshConversations();
   }, [refreshConversations]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listModels()
+      .then((data) => {
+        if (!cancelled) setModels(data);
+      })
+      .catch((err) => {
+        console.warn("Failed to load /models, using fallback", err);
+        if (!cancelled) setModels(FALLBACK_MODELS);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setMessages = useCallback(
     (
@@ -181,6 +221,47 @@ export default function ChatLayout({
     [refreshConversations, router, setMessages],
   );
 
+  const patchConversation = useCallback(
+    async (
+      id: string,
+      patch: ConversationPatch,
+    ): Promise<Conversation> => {
+      const prev = conversationsRef.current.find((c) => c.id === id);
+      if (prev) {
+        const optimistic: Conversation = {
+          ...prev,
+          ...("pinned_model" in patch
+            ? { pinned_model: patch.pinned_model ?? null }
+            : {}),
+          ...("auto_route_enabled" in patch &&
+          patch.auto_route_enabled !== undefined
+            ? { auto_route_enabled: patch.auto_route_enabled }
+            : {}),
+        };
+        setConversations((curr) =>
+          curr.map((c) => (c.id === id ? optimistic : c)),
+        );
+      }
+      try {
+        const updated = await patchConversationApi(id, patch);
+        setConversations((curr) =>
+          curr.map((c) => (c.id === id ? updated : c)),
+        );
+        return updated;
+      } catch (err) {
+        if (prev) {
+          const snapshot = prev;
+          setConversations((curr) =>
+            curr.map((c) => (c.id === id ? snapshot : c)),
+          );
+        }
+        console.error("Failed to patch conversation", err);
+        throw err;
+      }
+    },
+    [],
+  );
+
   const getMessages = useCallback(
     (id: string | null) => (id ? messagesByConv[id] : []),
     [messagesByConv],
@@ -191,14 +272,25 @@ export default function ChatLayout({
     [streamingByConv],
   );
 
+  const currentConversation = useMemo(
+    () =>
+      currentId
+        ? (conversations.find((c) => c.id === currentId) ?? null)
+        : null,
+    [conversations, currentId],
+  );
+
   return (
     <ChatLayoutContext.Provider
       value={{
         conversations,
         conversationsLoading,
         refreshConversations,
+        currentConversation,
         currentModel,
         setCurrentModel,
+        models,
+        patchConversation,
         getMessages,
         isStreaming,
         sendMessage,

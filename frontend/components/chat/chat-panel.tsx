@@ -60,6 +60,7 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
         <MessageList messages={list} />
       )}
       <Composer
+        key={conversationId ?? "new"}
         onSubmit={(content) => sendMessage(content, conversationId)}
         disabled={streaming}
         autoFocus
