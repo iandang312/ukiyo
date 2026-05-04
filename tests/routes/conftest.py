@@ -14,21 +14,35 @@ from ukiyo_service.infrastructure.db.session import ensure_dev_user
 
 
 @pytest.fixture(autouse=True)
-def _stub_classify_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default route tests to an empty classifier so they never call OpenAI.
+def _stub_routing_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default route tests to no-op embed + empty classifier so they never
+    hit OpenAI.
 
-    `classify()` embeds the prompt before any DB lookup, so without this stub
-    every route test that POSTs a message would hit the embeddings API. Tests
-    that need specific bucket scores override this with their own
-    `monkeypatch.setattr(...)` — the later patch wins.
+    Phase 7 made `messages.py` embed the prompt itself (so it can also feed
+    hysteresis), then call `classify_from_embedding`. Both call sites would
+    otherwise burn embedding tokens in CI. Tests that need a specific vector
+    or bucket scores override these with their own `monkeypatch.setattr(...)`
+    — the later patch wins.
     """
 
-    async def _empty(prompt: str, session: Any) -> dict[str, float]:
+    async def _empty_embed(text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def _empty_classify(
+        prompt_vec: list[float],
+        session: Any,
+        *,
+        prompt_for_heuristics: str,
+    ) -> dict[str, float]:
         return {}
 
     monkeypatch.setattr(
-        "ukiyo_service.application.routes.messages.classify",
-        _empty,
+        "ukiyo_service.application.routes.messages.embed",
+        _empty_embed,
+    )
+    monkeypatch.setattr(
+        "ukiyo_service.application.routes.messages.classify_from_embedding",
+        _empty_classify,
     )
 
 

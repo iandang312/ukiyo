@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(me.router)
 app.include_router(conversations.router)
+app.include_router(conversations.models_router)
 app.include_router(messages.router)
 
 
