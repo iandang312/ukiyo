@@ -57,9 +57,17 @@ async def classify_from_embedding(
     """Score buckets given a precomputed prompt embedding.
 
     For each bucket, take the top-K nearest exemplars by cosine similarity
-    and average them, then add additive heuristic boosts. Heuristics still
-    need the original prompt text — vectors don't carry the literal "```"
-    or "Traceback" markers the boost rules look for.
+    and use the **maximum** as the bucket score, then add additive heuristic
+    boosts. Was originally `mean` over top-K but `text-embedding-3-small`
+    similarity falls off sharply between near-duplicates and merely-related
+    prompts: averaging a 0.92 near-duplicate match with four ~0.20 unrelated
+    exemplars from the same bucket erased the signal we want. Max preserves
+    "is there *some* exemplar this prompt closely matches?" — see CONTEXT.md
+    Routing internals. Top-K is kept at 5 (cheap query, leaves room for a
+    hybrid aggregation later) even though only the maximum is consumed.
+
+    Heuristics still need the original prompt text — vectors don't carry the
+    literal "```" or "Traceback" markers the boost rules look for.
     """
     distinct_buckets = await session.execute(
         select(BucketExemplar.bucket).distinct()
@@ -79,7 +87,7 @@ async def classify_from_embedding(
         if not distances:
             continue
         similarities = [1.0 - d for d in distances]
-        scores[bucket] = sum(similarities) / len(similarities)
+        scores[bucket] = max(similarities)
 
     return _apply_heuristic_boosts(prompt_for_heuristics, scores)
 
