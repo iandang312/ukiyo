@@ -37,18 +37,36 @@ DESIGN_PATTERN: re.Pattern[str] = re.compile(
 async def classify(prompt: str, session: AsyncSession) -> dict[str, float]:
     """Score every bucket present in `bucket_exemplars` for this prompt.
 
-    For each bucket, take the top-K nearest exemplars by cosine similarity
-    and average them, then add additive heuristic boosts. Returned dict is
-    `{bucket_name: score}`.
+    Embeds the prompt and delegates to `classify_from_embedding`. Kept as
+    the convenience surface for callers that don't already hold an embedding;
+    `messages.py` reuses its own embed call for hysteresis and goes through
+    `classify_from_embedding` directly.
     """
     query_vec = await embed(prompt)
+    return await classify_from_embedding(
+        query_vec, session, prompt_for_heuristics=prompt
+    )
 
+
+async def classify_from_embedding(
+    prompt_vec: list[float],
+    session: AsyncSession,
+    *,
+    prompt_for_heuristics: str,
+) -> dict[str, float]:
+    """Score buckets given a precomputed prompt embedding.
+
+    For each bucket, take the top-K nearest exemplars by cosine similarity
+    and average them, then add additive heuristic boosts. Heuristics still
+    need the original prompt text — vectors don't carry the literal "```"
+    or "Traceback" markers the boost rules look for.
+    """
     distinct_buckets = await session.execute(
         select(BucketExemplar.bucket).distinct()
     )
     buckets = sorted(b for (b,) in distinct_buckets.all())
 
-    distance = BucketExemplar.embedding.cosine_distance(query_vec)
+    distance = BucketExemplar.embedding.cosine_distance(prompt_vec)
     scores: dict[str, float] = {}
     for bucket in buckets:
         result = await session.execute(
@@ -63,7 +81,7 @@ async def classify(prompt: str, session: AsyncSession) -> dict[str, float]:
         similarities = [1.0 - d for d in distances]
         scores[bucket] = sum(similarities) / len(similarities)
 
-    return _apply_heuristic_boosts(prompt, scores)
+    return _apply_heuristic_boosts(prompt_for_heuristics, scores)
 
 
 def _apply_heuristic_boosts(
