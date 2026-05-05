@@ -57,7 +57,7 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
           </h1>
         </div>
       ) : (
-        <MessageList messages={list} />
+        <MessageList messages={list} conversationId={conversationId} />
       )}
       <Composer
         key={conversationId ?? "new"}

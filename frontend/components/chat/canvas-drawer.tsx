@@ -10,11 +10,23 @@ import {
 } from "react";
 import {
   ArrowLeftIcon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
   RefreshCwIcon,
   SendHorizontalIcon,
   XIcon,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Tabs,
   TabsContent,
@@ -22,6 +34,8 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { CodeBlock } from "@/components/ai-elements/code-block";
+import { issueHandoff } from "@/lib/api/designs";
+import type { IssueHandoffOut } from "@/lib/api/types";
 import { useChatLayout } from "./context";
 import { cn } from "@/lib/utils";
 
@@ -79,7 +93,12 @@ export function CanvasDrawer({ conversationId }: CanvasDrawerProps) {
     <>
       <DesktopOnlyPlaceholder conversationId={conversationId} />
       <div className="hidden min-w-0 flex-1 flex-col bg-zinc-950 md:flex">
-        <DrawerHeader conversationId={conversationId} title={design?.title} />
+        <DrawerHeader
+          conversationId={conversationId}
+          title={design?.title}
+          designId={design?.id ?? null}
+          currentVersionId={currentVersion?.id ?? null}
+        />
         <DrawerBody
           conversationId={conversationId}
           status={status}
@@ -119,9 +138,13 @@ function DesktopOnlyPlaceholder({
 function DrawerHeader({
   conversationId,
   title,
+  designId,
+  currentVersionId,
 }: {
   conversationId: string;
   title: string | null | undefined;
+  designId: string | null;
+  currentVersionId: string | null;
 }) {
   return (
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-900 bg-black/40 px-4 py-3">
@@ -142,7 +165,12 @@ function DrawerHeader({
           </div>
         </div>
       </div>
-      {/* Open in Figma button lands in commit 4. */}
+      {designId && currentVersionId && (
+        <FigmaHandoffButton
+          designId={designId}
+          versionId={currentVersionId}
+        />
+      )}
     </header>
   );
 }
@@ -300,8 +328,16 @@ function CanvasIframe({
   // clicked an element) and `ukiyo:rect_reply` (iframe answered our rect
   // request). Stale rect replies (uid drift between request and reply)
   // are dropped by matching against the current selection's uid.
+  //
+  // The `e.source` guard is load-bearing: thumbnail iframes (rendered
+  // inside chat panel "design vN" rows) ALSO post ukiyo:select on click
+  // even though `pointer-events: none` blocks most clicks. If the user
+  // somehow triggers a thumbnail click, we don't want a stray select
+  // event to open an overlay positioned against the wrong document.
   useEffect(() => {
     const handler = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+
       const d = e.data as
         | { type?: string; uid?: string; tag?: string; rect?: SelectionState["rect"] }
         | null;
@@ -527,4 +563,172 @@ function VersionTimeline({
       </ul>
     </aside>
   );
+}
+
+// --- Open in Figma --------------------------------------------------------
+//
+// Issue a handoff code on click and surface it in a modal. The modal is
+// the only place the user ever sees the code (single-show contract per
+// CONTEXT.md decision #19) — closing it discards the on-screen copy.
+// The issued row remains valid in the DB until expiry or first redeem,
+// so a user who copied it before closing can still paste it into the
+// (Phase 14) plugin.
+
+function FigmaHandoffButton({
+  designId,
+  versionId,
+}: {
+  designId: string;
+  versionId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [handoff, setHandoff] = useState<IssueHandoffOut | null>(null);
+  const [issuing, setIssuing] = useState(false);
+
+  const onClick = useCallback(async () => {
+    setIssuing(true);
+    setHandoff(null);
+    setOpen(true);
+    try {
+      const result = await issueHandoff(designId, versionId);
+      setHandoff(result);
+    } catch (err) {
+      console.error("Failed to issue handoff", err);
+      toast.error("Couldn't generate Figma code. Try again.");
+      setOpen(false);
+    } finally {
+      setIssuing(false);
+    }
+  }, [designId, versionId]);
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={onClick}
+        disabled={issuing}
+        className="gap-2"
+      >
+        <ExternalLinkIcon size={14} />
+        Open in Figma
+      </Button>
+      <FigmaHandoffDialog
+        open={open}
+        onOpenChange={setOpen}
+        handoff={handoff}
+        issuing={issuing}
+      />
+    </>
+  );
+}
+
+function FigmaHandoffDialog({
+  open,
+  onOpenChange,
+  handoff,
+  issuing,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  handoff: IssueHandoffOut | null;
+  issuing: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Open in Figma</DialogTitle>
+          <DialogDescription>
+            Paste this code into the Ukiyo Figma plugin to import this
+            design version. The code expires shortly and can be used once.
+          </DialogDescription>
+        </DialogHeader>
+        {issuing || !handoff ? (
+          <div className="rounded-md border border-dashed border-zinc-700 px-4 py-6 text-center text-sm text-zinc-500">
+            Generating code…
+          </div>
+        ) : (
+          <HandoffCodeBlock handoff={handoff} />
+        )}
+        <DialogFooter className="text-xs text-zinc-500">
+          The Ukiyo Figma plugin ships in a future release; this code can
+          be redeemed against the public API today.
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HandoffCodeBlock({ handoff }: { handoff: IssueHandoffOut }) {
+  const expiresAt = useMemo(
+    () => new Date(handoff.expires_at).getTime(),
+    [handoff.expires_at],
+  );
+  const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
+
+  // Tick every second so the countdown shows live time-to-expiry.
+  // Stops once the code is expired so we don't churn cycles forever.
+  useEffect(() => {
+    if (now >= expiresAt) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [expiresAt, now]);
+
+  const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+  const expired = remaining === 0;
+
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(handoff.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error("Clipboard write failed", err);
+      toast.error("Couldn't copy. Select the code manually.");
+    }
+  }, [handoff.code]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2">
+        <code className="flex-1 select-all font-mono text-base tracking-[0.2em] text-white">
+          {handoff.code}
+        </code>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onCopy}
+          aria-label="Copy code"
+          className="gap-1.5"
+        >
+          {copied ? (
+            <>
+              <CheckIcon size={14} />
+              Copied
+            </>
+          ) : (
+            <>
+              <CopyIcon size={14} />
+              Copy
+            </>
+          )}
+        </Button>
+      </div>
+      <div className="flex items-center justify-between text-xs">
+        <span className={cn("text-zinc-500", expired && "text-red-400")}>
+          {expired ? "Expired — request a new code" : `Expires in ${formatRemaining(remaining)}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function formatRemaining(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
 }

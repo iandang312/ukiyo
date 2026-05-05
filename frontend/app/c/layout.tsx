@@ -134,13 +134,32 @@ export default function ChatLayout({
       inflightHistoryRef.current.add(id);
       try {
         const msgs = await fetchMessages(id);
-        const chatMsgs: ChatMessage[] = msgs.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          model: m.model_used,
-        }));
+        let sawCanvasRow = false;
+        const chatMsgs: ChatMessage[] = msgs.map((m) => {
+          // Phase 13: assistant rows with a design_version_id were
+          // produced by canvas turns. Tagging them lets the Message
+          // component render a thumbnail card instead of dumping the
+          // multi-kilobyte HTML in chat.
+          const isCanvas = Boolean(m.design_version_id);
+          if (isCanvas) sawCanvasRow = true;
+          return {
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            model: m.model_used,
+            surface: isCanvas ? "canvas" : "chat",
+            designVersionId: m.design_version_id ?? null,
+          };
+        });
         setMessages(id, chatMsgs);
+        // Lazy-load the design when historical canvas rows exist so the
+        // thumbnails can render. The drawer would re-fetch on its own
+        // mount; this just makes the chat-only route show full thumbnails
+        // immediately. Fire-and-forget — Message renders a placeholder
+        // until hydration lands.
+        if (sawCanvasRow) {
+          void refreshDesignRef.current?.(id);
+        }
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
           router.replace("/c");
@@ -189,12 +208,14 @@ export default function ChatLayout({
       const tempAssistantId = `assistant-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
+      const surface: "chat" | "canvas" = options?.surface ?? "chat";
       const assistantMsg: ChatMessage = {
         id: tempAssistantId,
         role: "assistant",
         content: "",
         model: null,
         isStreaming: true,
+        surface,
       };
       setMessages(id, (prev) => [...prev, assistantMsg]);
       setStreamingByConv((prev) => ({ ...prev, [id]: true }));
@@ -213,9 +234,19 @@ export default function ChatLayout({
           onMeta: (meta) => {
             setCurrentModel(meta.model);
             setMessages(id, (prev) =>
-              prev.map((m) =>
-                m.id === tempAssistantId ? { ...m, model: meta.model } : m,
-              ),
+              prev.map((m) => {
+                if (m.id !== tempAssistantId) return m;
+                // Phase 13: chat-mode meta with `promote_to_canvas: true`
+                // surfaces the "Open in design canvas" button below this
+                // row. The user prompt is captured at this layer (not
+                // recovered later from the message list) because the
+                // user-message id is brittle when streaming concurrently.
+                const promote =
+                  meta.surface === "chat" && meta.promote_to_canvas === true
+                    ? { promoteToCanvas: { prompt: content } }
+                    : {};
+                return { ...m, model: meta.model, ...promote };
+              }),
             );
           },
           onDelta: (delta) => {
@@ -231,7 +262,15 @@ export default function ChatLayout({
             setMessages(id, (prev) =>
               prev.map((m) =>
                 m.id === tempAssistantId
-                  ? { ...m, id: done.message_id, isStreaming: false }
+                  ? {
+                      ...m,
+                      id: done.message_id,
+                      isStreaming: false,
+                      // Stamp design_version_id from the done payload
+                      // so the row immediately upgrades to a thumbnail
+                      // (assuming design state is already / soon hydrated).
+                      designVersionId: done.version_id ?? null,
+                    }
                   : m,
               ),
             );
@@ -308,13 +347,30 @@ export default function ChatLayout({
 
   const revertDesignVersion = useCallback(
     async (conversationId: string, versionId: string) => {
-      const design = designsByConv[conversationId];
+      // Race: revert may be triggered before hydration completes
+      // (e.g. an inline message thumbnail clicked from chat-only
+      // mode where the drawer hasn't mounted yet). Hydrate first so
+      // we have the design id to PATCH against.
+      let design = designsByConv[conversationId];
       if (!design) {
-        // Race: revert clicked before hydration finished. Refetch first
-        // so the user-visible failure is "drawer reloading", not "PATCH
-        // 404 on a design we haven't seen yet".
         await refreshDesign(conversationId);
-        return;
+        // setState batching means designsByConv hasn't updated in this
+        // closure yet — fetch directly to get a fresh value.
+        try {
+          design = await getConversationDesign(conversationId);
+          setDesignsByConv((prev) => ({
+            ...prev,
+            [conversationId]: design as Design,
+          }));
+          setDesignStatusByConv((prev) => ({
+            ...prev,
+            [conversationId]: "ready",
+          }));
+        } catch (err) {
+          console.error("Failed to load design before revert", err);
+          toast.error("Couldn't load the design. Try again.");
+          return;
+        }
       }
       const previous = design;
       // Optimistic flip: show the target version immediately so the iframe
@@ -335,6 +391,29 @@ export default function ChatLayout({
       }
     },
     [designsByConv, refreshDesign],
+  );
+
+  const dispatchCanvasFromPromotion = useCallback(
+    async (conversationId: string, prompt: string) => {
+      // Open the drawer first so the user sees the canvas surface come
+      // up alongside the streaming response. sendMessage is fire-and-
+      // forget here (no await before navigation) so the route swap
+      // doesn't wait on the SSE stream to start.
+      router.push(`/c/${conversationId}/canvas`);
+      void sendMessage(prompt, conversationId, { surface: "canvas" });
+    },
+    [router, sendMessage],
+  );
+
+  const dispatchCanvasFromVersion = useCallback(
+    async (conversationId: string, versionId: string) => {
+      // Pin to the requested version, then navigate. Order matters:
+      // PATCH-then-navigate means the drawer mounts to the correct
+      // current_version_id without flashing the stale one.
+      await revertDesignVersion(conversationId, versionId);
+      router.push(`/c/${conversationId}/canvas`);
+    },
+    [revertDesignVersion, router],
   );
 
   const patchConversation = useCallback(
@@ -426,6 +505,8 @@ export default function ChatLayout({
         getDesignStatus,
         refreshDesign,
         revertDesignVersion,
+        dispatchCanvasFromPromotion,
+        dispatchCanvasFromVersion,
       }}
     >
       <div className="flex h-screen w-screen overflow-hidden bg-black font-sans text-white antialiased">

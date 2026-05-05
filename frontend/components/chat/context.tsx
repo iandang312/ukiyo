@@ -51,6 +51,19 @@ export interface ChatLayoutContextValue {
     conversationId: string,
     versionId: string,
   ) => Promise<void>;
+
+  // Phase 13 promotion + version-thumbnail handlers. These wrap
+  // sendMessage / revertDesignVersion + a navigation, expressed as
+  // single methods so call sites don't have to thread next/router and
+  // sequence the two calls themselves.
+  dispatchCanvasFromPromotion: (
+    conversationId: string,
+    prompt: string,
+  ) => Promise<void>;
+  dispatchCanvasFromVersion: (
+    conversationId: string,
+    versionId: string,
+  ) => Promise<void>;
 }
 
 export const ChatLayoutContext = createContext<ChatLayoutContextValue | null>(

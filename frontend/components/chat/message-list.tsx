@@ -5,9 +5,10 @@ import { Message, type ChatMessage } from "./message";
 
 interface MessageListProps {
   messages: ChatMessage[];
+  conversationId: string | null;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, conversationId }: MessageListProps) {
   return (
     <StickToBottom
       className="relative min-h-0 flex-1 overflow-hidden"
@@ -22,7 +23,7 @@ export function MessageList({ messages }: MessageListProps) {
           className="mx-auto flex w-full max-w-3xl flex-col gap-10"
         >
           {messages.map((m) => (
-            <Message key={m.id} message={m} />
+            <Message key={m.id} message={m} conversationId={conversationId} />
           ))}
         </div>
       </StickToBottom.Content>
