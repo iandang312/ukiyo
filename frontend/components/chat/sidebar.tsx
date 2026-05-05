@@ -43,7 +43,7 @@ export function Sidebar() {
 
       <div className="px-3 pb-3">
         <Link
-          href="/chat"
+          href="/c"
           className={cn(
             "flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 transition-colors hover:bg-zinc-900",
             collapsed && "justify-center px-0",

@@ -57,7 +57,7 @@ export function ConversationList({ collapsed }: ConversationListProps) {
           return (
             <li key={c.id}>
               <Link
-                href={`/chat/${c.id}`}
+                href={`/c/${c.id}`}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "block truncate rounded-md px-3 py-2 text-sm transition-colors",

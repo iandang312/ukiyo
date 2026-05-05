@@ -4,9 +4,23 @@ import { createContext, useContext } from "react";
 import type {
   Conversation,
   ConversationPatch,
+  Design,
   ModelsResponse,
 } from "@/lib/api/types";
 import type { ChatMessage } from "./message";
+
+// Phase 13: design state lives at the layout level so:
+//  - the chat-panel can render "design vN" inline rows + the promotion
+//    button without re-hydrating per-render
+//  - the canvas page (a separate route) can read drawer state without
+//    its own fetch
+//  - state survives route swaps between /c/{id} and /c/{id}/canvas
+//
+// `designStatusByConv` distinguishes "no canvas turn yet → drawer is
+// empty" (`empty`) from "fetch failed → show retry" (`error`) and
+// "still fetching" (`loading`). Indexed by conversation id so switching
+// conversations doesn't drop the cache.
+export type DesignStatus = "idle" | "loading" | "empty" | "error" | "ready";
 
 export interface ChatLayoutContextValue {
   conversations: Conversation[];
@@ -22,8 +36,21 @@ export interface ChatLayoutContextValue {
   ) => Promise<Conversation>;
   getMessages: (conversationId: string | null) => ChatMessage[] | undefined;
   isStreaming: (conversationId: string | null) => boolean;
-  sendMessage: (content: string, conversationId: string | null) => Promise<void>;
+  sendMessage: (
+    content: string,
+    conversationId: string | null,
+    options?: { surface?: "chat" | "canvas"; editScopeUid?: number },
+  ) => Promise<void>;
   loadHistory: (conversationId: string) => Promise<void>;
+
+  // Phase 13 canvas state
+  getDesign: (conversationId: string | null) => Design | null;
+  getDesignStatus: (conversationId: string | null) => DesignStatus;
+  refreshDesign: (conversationId: string) => Promise<void>;
+  revertDesignVersion: (
+    conversationId: string,
+    versionId: string,
+  ) => Promise<void>;
 }
 
 export const ChatLayoutContext = createContext<ChatLayoutContextValue | null>(

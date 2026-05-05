@@ -23,7 +23,7 @@ export default function SignUpPage() {
                 </Button>
 
                 <Button variant="ghost" className="rounded-full bg-black text-white hover:bg-gray-300 ">
-                    <Link href="/chat">go to chat</Link>
+                    <Link href="/c">go to chat</Link>
                 </Button>
             </div>
             </section>
