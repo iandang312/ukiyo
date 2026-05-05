@@ -752,3 +752,148 @@ async def test_promote_to_canvas_absent_when_only_intent_matches(
     )
     meta = _parse_sse(raw)[0][1]
     assert "promote_to_canvas" not in meta
+
+
+async def test_promote_to_canvas_fires_on_borderline_classifier_confidence(
+    client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: _FakeStreamProvider,
+) -> None:
+    """Classifier picks design at a confidence that clears the 0.55 routing
+    floor but would have failed the older 0.65 promotion floor. Regression
+    for the canonical case where 'can you design a mock up for a simple
+    welcome dashboard' scored ~0.56 → routed correctly to gpt-4o → button
+    silently suppressed because the old gate insisted on >= 0.65."""
+
+    async def _borderline_classify(prompt_vec, session, *, prompt_for_heuristics):
+        return {"design": 0.56, "coding": 0.10, "research": 0.10}
+
+    monkeypatch.setattr(
+        "ukiyo_service.application.routes.messages.classify_from_embedding",
+        _borderline_classify,
+    )
+
+    settings = get_settings()
+    conv = (await client.post("/conversations")).json()
+    raw = await _drain_sse(
+        client, f"/conversations/{conv['id']}/messages",
+        {"content": "can you design a mock up for a simple welcome dashboard"},
+    )
+    meta = _parse_sse(raw)[0][1]
+    assert meta["bucket"] == "design"
+    assert 0.55 <= meta["confidence"] < 0.65
+    assert meta["model"] == settings.BUCKET_MODEL_MAP["design"]
+    assert meta.get("promote_to_canvas") is True
+
+
+async def test_promote_to_canvas_fires_on_hysteresis_stuck_design(
+    client: AsyncClient,
+    db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_provider: _FakeStreamProvider,
+) -> None:
+    """Hysteresis stick on a prior design turn produces a meta event with
+    `bucket: null, confidence: null` (classification was skipped). The
+    promotion still fires because routing landed on the design model and
+    the prompt has the verb+noun signature. Regression for the case
+    where a multi-turn design conversation silently lost its promotion
+    button on follow-up build requests."""
+    settings = get_settings()
+    prior_vec = [1.0] + [0.0] * 1535  # unit vector; cosine to itself = 1.0
+
+    async def _same_vec(text: str) -> list[float]:
+        return list(prior_vec)
+
+    async def _explode(*a: Any, **kw: Any) -> dict[str, float]:
+        raise AssertionError(
+            "classify_from_embedding should not run when hysteresis sticks"
+        )
+
+    monkeypatch.setattr(
+        "ukiyo_service.application.routes.messages.embed", _same_vec
+    )
+    monkeypatch.setattr(
+        "ukiyo_service.application.routes.messages.classify_from_embedding",
+        _explode,
+    )
+
+    conv = (await client.post("/conversations")).json()
+    conv_row = (
+        await db.execute(
+            select(Conversation).where(Conversation.id == uuid.UUID(conv["id"]))
+        )
+    ).scalar_one()
+    conv_row.last_intent_vector = prior_vec
+    conv_row.last_intent_bucket = "design"
+    await db.commit()
+
+    raw = await _drain_sse(
+        client, f"/conversations/{conv['id']}/messages",
+        {"content": "design a pricing card"},
+    )
+    meta = _parse_sse(raw)[0][1]
+    assert meta["bucket"] is None
+    assert meta["confidence"] is None
+    assert meta["model"] == settings.BUCKET_MODEL_MAP["design"]
+    assert meta.get("promote_to_canvas") is True
+
+
+async def test_promote_to_canvas_fires_when_pinned_to_design(
+    client: AsyncClient,
+    db: AsyncSession,
+    stub_provider: _FakeStreamProvider,
+) -> None:
+    """Pinned-to-design path produces a meta event with `bucket: null,
+    confidence: null` (classification was skipped). Promotion still fires
+    because the pinned model IS the design model and the prompt has the
+    verb+noun signature."""
+    settings = get_settings()
+    conv = (await client.post("/conversations")).json()
+    conv_row = (
+        await db.execute(
+            select(Conversation).where(Conversation.id == uuid.UUID(conv["id"]))
+        )
+    ).scalar_one()
+    conv_row.pinned_model = settings.BUCKET_MODEL_MAP["design"]
+    conv_row.auto_route_enabled = False
+    await db.commit()
+
+    raw = await _drain_sse(
+        client, f"/conversations/{conv['id']}/messages",
+        {"content": "design a pricing card"},
+    )
+    meta = _parse_sse(raw)[0][1]
+    assert meta["bucket"] is None
+    assert meta["confidence"] is None
+    assert meta["model"] == settings.BUCKET_MODEL_MAP["design"]
+    assert meta.get("promote_to_canvas") is True
+
+
+async def test_promote_to_canvas_absent_when_pinned_to_non_design(
+    client: AsyncClient,
+    db: AsyncSession,
+    stub_provider: _FakeStreamProvider,
+) -> None:
+    """Negative case: pinning to a non-design model means the user opted
+    out of design routing, so even a verb+noun-shaped prompt must NOT
+    promote — opening the canvas would be a context-shifting jump away
+    from the model the user explicitly chose."""
+    settings = get_settings()
+    conv = (await client.post("/conversations")).json()
+    conv_row = (
+        await db.execute(
+            select(Conversation).where(Conversation.id == uuid.UUID(conv["id"]))
+        )
+    ).scalar_one()
+    conv_row.pinned_model = settings.BUCKET_MODEL_MAP["coding"]
+    conv_row.auto_route_enabled = False
+    await db.commit()
+
+    raw = await _drain_sse(
+        client, f"/conversations/{conv['id']}/messages",
+        {"content": "design a pricing card"},
+    )
+    meta = _parse_sse(raw)[0][1]
+    assert meta["model"] == settings.BUCKET_MODEL_MAP["coding"]
+    assert "promote_to_canvas" not in meta

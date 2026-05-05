@@ -79,14 +79,35 @@ _UI_NOUNS: tuple[str, ...] = (
 
 
 def _should_promote_to_canvas(
-    prompt: str, bucket: str | None, confidence: float | None
+    prompt: str,
+    bucket: str | None,
+    confidence: float | None,
+    model: str,
 ) -> bool:
-    """Build-request heuristic. Only fires on chat-surface turns where the
-    top bucket is `design` with confidence >= 0.65 AND the prompt contains
-    both a build verb and a UI noun. The route attaches `promote_to_canvas:
-    true` to the meta event when this is true; the field is omitted
-    otherwise (UI checks for presence, not a `false` value)."""
-    if bucket != "design" or confidence is None or confidence < 0.65:
+    """Build-request heuristic. Fires on chat-surface turns when the
+    *effective* model is the design bucket model AND the prompt contains
+    both a build verb and a UI noun. The route attaches
+    `promote_to_canvas: true` to the meta event when this is true; the
+    field is omitted otherwise (UI checks for presence, not `false`).
+
+    Three routing paths land on the design model and should all surface
+    the promotion when the lexical gate matches:
+
+      - classifier ran and picked design (confidence cleared the 0.55
+        routing floor — additional noise filtering happens in the
+        verb+noun gate, not via a separate confidence threshold);
+      - hysteresis stuck on a prior design turn (bucket=None);
+      - user pinned the design model (bucket=None).
+
+    Gating on `model` (not `bucket`) is what unifies the three. There is
+    intentionally no separate higher confidence floor on top: the 0.55
+    routing floor already gates "is this design at all," the verb+noun
+    lexical gate is the real signal for "is the user asking us to
+    BUILD," and an extra 0.65-style floor was historically just
+    suppressing borderline-but-correct routes (e.g. confidence ~0.56 on
+    a clean "design me a [UI noun]" prompt).
+    """
+    if model != get_settings().BUCKET_MODEL_MAP.get("design"):
         return False
     lowered = prompt.lower()
     return any(v in lowered for v in _BUILD_VERBS) and any(
@@ -329,9 +350,11 @@ async def post_message(
             "confidence": confidence,
         }
         # Phase 12 build-request promotion: attach `promote_to_canvas: true`
-        # only when both heuristics fire (UI checks for presence). Cannot
-        # fire on pinned/hysteresis paths because `bucket` is None there.
-        if _should_promote_to_canvas(body.content, bucket, confidence):
+        # when the effective model is the design model and the lexical
+        # gate matches. Fires on classifier-routed design (>= 0.65),
+        # hysteresis stick on design, and pinned-design routing — see
+        # _should_promote_to_canvas docstring for the unification.
+        if _should_promote_to_canvas(body.content, bucket, confidence, model):
             meta_payload["promote_to_canvas"] = True
         yield _sse_event("meta", meta_payload)
 
