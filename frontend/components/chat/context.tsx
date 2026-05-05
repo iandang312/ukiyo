@@ -14,7 +14,7 @@ import type { ChatMessage } from "./message";
 //    button without re-hydrating per-render
 //  - the canvas page (a separate route) can read drawer state without
 //    its own fetch
-//  - state survives route swaps between /c/{id} and /c/{id}/canvas
+//  - state survives route swaps between /chat/{id} and /chat/{id}/canvas
 //
 // `designStatusByConv` distinguishes "no canvas turn yet → drawer is
 // empty" (`empty`) from "fetch failed → show retry" (`error`) and

@@ -162,7 +162,7 @@ export default function ChatLayout({
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
-          router.replace("/c");
+          router.replace("/chat");
         } else {
           console.error("Failed to load conversation history", err);
         }
@@ -195,7 +195,7 @@ export default function ChatLayout({
             ...prev.filter((c) => c.id !== conv.id),
           ]);
           setMessages(convId, [userMsg]);
-          router.replace(`/c/${convId}`);
+          router.replace(`/chat/${convId}`);
         } catch (err) {
           console.error("Failed to create conversation", err);
           return;
@@ -399,7 +399,7 @@ export default function ChatLayout({
       // up alongside the streaming response. sendMessage is fire-and-
       // forget here (no await before navigation) so the route swap
       // doesn't wait on the SSE stream to start.
-      router.push(`/c/${conversationId}/canvas`);
+      router.push(`/chat/${conversationId}/canvas`);
       void sendMessage(prompt, conversationId, { surface: "canvas" });
     },
     [router, sendMessage],
@@ -411,7 +411,7 @@ export default function ChatLayout({
       // PATCH-then-navigate means the drawer mounts to the correct
       // current_version_id without flashing the stale one.
       await revertDesignVersion(conversationId, versionId);
-      router.push(`/c/${conversationId}/canvas`);
+      router.push(`/chat/${conversationId}/canvas`);
     },
     [revertDesignVersion, router],
   );

@@ -56,7 +56,7 @@ interface CanvasDrawerProps {
 // Below the desktop breakpoint we render a placeholder. The chat side of
 // the canvas page is hidden on mobile (so the chat panel doesn't squeeze
 // into a narrow rail) — the drawer + placeholder combo means mobile users
-// who deep-link to /c/{id}/canvas see a "switch to desktop" message
+// who deep-link to /chat/{id}/canvas see a "switch to desktop" message
 // rather than a broken layout.
 export function CanvasDrawer({ conversationId }: CanvasDrawerProps) {
   const {
@@ -126,7 +126,7 @@ function DesktopOnlyPlaceholder({
         The design canvas is desktop-only in v1.
       </p>
       <Link
-        href={`/c/${conversationId}`}
+        href={`/chat/${conversationId}`}
         className="text-xs text-zinc-500 underline hover:text-zinc-300"
       >
         Back to chat
@@ -150,7 +150,7 @@ function DrawerHeader({
     <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-900 bg-black/40 px-4 py-3">
       <div className="flex min-w-0 items-center gap-3">
         <Link
-          href={`/c/${conversationId}`}
+          href={`/chat/${conversationId}`}
           aria-label="Close canvas"
           className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
         >
