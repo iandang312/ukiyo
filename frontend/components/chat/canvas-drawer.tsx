@@ -15,6 +15,7 @@ import {
   ExternalLinkIcon,
   RefreshCwIcon,
   SendHorizontalIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -216,7 +217,7 @@ function DrawerBody({
   }
 
   if (status === "empty") {
-    return <EmptyState />;
+    return <EmptyState conversationId={conversationId} />;
   }
 
   if (status === "error" || !currentVersion) {
@@ -247,14 +248,73 @@ function DrawerBody({
   );
 }
 
-function EmptyState() {
+function EmptyState({ conversationId }: { conversationId: string }) {
+  // The promotion heuristic in messages.py is the canonical entry into
+  // canvas mode, but it requires the design bucket to clear 0.65 — which
+  // doesn't always fire for short prompts. This composer is the fallback:
+  // direct-URL into /chat/{id}/canvas on a fresh conversation, type
+  // anything, and it dispatches as surface:"canvas" regardless of the
+  // classifier's score. Bypasses the heuristic entirely.
+  const { sendMessage, isStreaming } = useChatLayout();
+  const [content, setContent] = useState("");
+  const streaming = isStreaming(conversationId);
+
+  const onSubmit = useCallback(async () => {
+    const prompt = content.trim();
+    if (!prompt || streaming) return;
+    setContent("");
+    await sendMessage(prompt, conversationId, { surface: "canvas" });
+  }, [content, streaming, sendMessage, conversationId]);
+
+  if (streaming) {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+      >
+        <SparklesIcon size={20} className="animate-pulse text-blue-400" />
+        <p className="text-sm text-zinc-300">Generating your design…</p>
+        <p className="max-w-sm text-xs text-zinc-500">
+          The first version will appear here when it's ready.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-      <p className="text-sm text-zinc-300">No design here yet.</p>
-      <p className="max-w-sm text-xs text-zinc-500">
-        Ask in the chat for a page, card, layout, or any other UI — the
-        first canvas-routed response will appear here.
-      </p>
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="space-y-1">
+        <p className="text-sm text-zinc-300">Start a new design</p>
+        <p className="mx-auto max-w-sm text-xs text-zinc-500">
+          Describe what you want — a page, card, layout, dashboard, anything.
+        </p>
+      </div>
+      <div className="flex w-full max-w-md items-end gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-2">
+        <textarea
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
+          placeholder="Design me a…"
+          rows={3}
+          aria-label="Design prompt"
+          className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-white outline-none placeholder:text-zinc-600"
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={onSubmit}
+          disabled={!content.trim()}
+          aria-label="Generate design"
+        >
+          <SendHorizontalIcon size={14} />
+        </Button>
+      </div>
     </div>
   );
 }
