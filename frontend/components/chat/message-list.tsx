@@ -15,15 +15,20 @@ export function MessageList({ messages, conversationId }: MessageListProps) {
       resize="smooth"
       initial="instant"
     >
-      <StickToBottom.Content className="flex flex-col gap-10 px-6 py-8">
+      <StickToBottom.Content className="flex flex-col gap-12 px-6 py-8">
         <div
           role="log"
           aria-label="Conversation"
           aria-live="off"
-          className="mx-auto flex w-full max-w-3xl flex-col gap-10"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-12"
         >
           {messages.map((m) => (
-            <Message key={m.id} message={m} conversationId={conversationId} />
+            <div
+              key={m.id}
+              className="animate-in fade-in slide-in-from-bottom-1 duration-300"
+            >
+              <Message message={m} conversationId={conversationId} />
+            </div>
           ))}
         </div>
       </StickToBottom.Content>

@@ -5,8 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ChatLayoutContext,
+  type ChatTheme,
   type DesignStatus,
 } from "@/components/chat/context";
+import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/components/chat/message";
 import { Sidebar } from "@/components/chat/sidebar";
 import { TopStrip } from "@/components/chat/top-strip";
@@ -51,6 +53,29 @@ export default function ChatLayout({
   const params = useParams<{ id?: string }>();
   const currentId =
     typeof params?.id === "string" ? params.id : null;
+
+  // Phase 7: chat-scoped theme. Default "dark" matches the prior look so
+  // first paint stays consistent; localStorage value is applied in an
+  // effect to avoid SSR/CSR hydration mismatch.
+  const [chatTheme, setChatThemeState] = useState<ChatTheme>("dark");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("ukiyo:chat-theme");
+      if (saved === "light" || saved === "dark") {
+        setChatThemeState(saved);
+      }
+    } catch {
+      // localStorage may be unavailable (private mode, etc.) — fall back to default.
+    }
+  }, []);
+  const setChatTheme = useCallback((theme: ChatTheme) => {
+    setChatThemeState(theme);
+    try {
+      window.localStorage.setItem("ukiyo:chat-theme", theme);
+    } catch {
+      // ignore — see above
+    }
+  }, []);
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationsLoading, setConversationsLoading] = useState(true);
@@ -489,6 +514,8 @@ export default function ChatLayout({
   return (
     <ChatLayoutContext.Provider
       value={{
+        chatTheme,
+        setChatTheme,
         conversations,
         conversationsLoading,
         refreshConversations,
@@ -509,7 +536,12 @@ export default function ChatLayout({
         dispatchCanvasFromVersion,
       }}
     >
-      <div className="flex h-screen w-screen overflow-hidden bg-black font-sans text-white antialiased">
+      <div
+        className={cn(
+          "flex h-screen w-screen overflow-hidden bg-background font-sans text-foreground antialiased",
+          chatTheme === "dark" && "dark",
+        )}
+      >
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
           <TopStrip />

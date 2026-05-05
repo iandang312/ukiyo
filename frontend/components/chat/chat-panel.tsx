@@ -51,10 +51,23 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {isEmpty ? (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-          <h1 className="text-2xl font-light tracking-tight text-white">
-            What can I help with?
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+          <h1 className="text-2xl font-light tracking-tight text-foreground">
+            What are we building today?
           </h1>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {STARTER_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                disabled={streaming}
+                onClick={() => sendMessage(prompt, conversationId)}
+                className="rounded-full border border-border px-4 py-2 text-sm text-foreground transition hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
         </div>
       ) : (
         <MessageList messages={list} conversationId={conversationId} />
@@ -69,6 +82,13 @@ export function ChatPanel({ conversationId }: ChatPanelProps) {
   );
 }
 
+const STARTER_PROMPTS = [
+  "Design a pricing page",
+  "Build a landing hero",
+  "Refactor a Python function",
+  "Explain how OAuth works",
+];
+
 function HistorySkeleton() {
   return (
     <div
@@ -79,11 +99,11 @@ function HistorySkeleton() {
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-10">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex flex-col gap-2">
-            <div className="h-3 w-16 animate-pulse rounded bg-zinc-900" />
+            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
             <div className="flex flex-col gap-2">
-              <div className="h-4 w-full animate-pulse rounded bg-zinc-900" />
-              <div className="h-4 w-11/12 animate-pulse rounded bg-zinc-800" />
-              <div className="h-4 w-8/12 animate-pulse rounded bg-zinc-900" />
+              <div className="h-4 w-full animate-pulse rounded bg-muted" />
+              <div className="h-4 w-11/12 animate-pulse rounded bg-muted/70" />
+              <div className="h-4 w-8/12 animate-pulse rounded bg-muted" />
             </div>
           </div>
         ))}

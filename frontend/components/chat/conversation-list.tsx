@@ -29,7 +29,7 @@ export function ConversationList({ collapsed }: ConversationListProps) {
           <div
             key={i}
             className={cn(
-              "h-9 animate-pulse rounded-md bg-zinc-900",
+              "h-9 animate-pulse rounded-md bg-muted",
               width,
             )}
           />
@@ -42,7 +42,7 @@ export function ConversationList({ collapsed }: ConversationListProps) {
     return (
       <div
         role="status"
-        className="px-3 py-2 text-xs text-zinc-600"
+        className="px-3 py-2 text-xs text-muted-foreground"
       >
         No conversations yet
       </div>
@@ -62,8 +62,8 @@ export function ConversationList({ collapsed }: ConversationListProps) {
                 className={cn(
                   "block truncate rounded-md px-3 py-2 text-sm transition-colors",
                   isActive
-                    ? "bg-zinc-800 text-white"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
                 )}
               >
                 {c.title ?? "Untitled"}

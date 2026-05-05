@@ -58,7 +58,7 @@ export function ModelPicker() {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Change model"
-        className="flex items-center gap-1 font-mono text-xs tracking-tight text-zinc-500 outline-none transition-colors hover:text-zinc-300 focus-visible:text-zinc-300"
+        className="flex items-center gap-1 font-mono text-xs tracking-tight text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
       >
         <span>{triggerLabel}</span>
         <ChevronDownIcon size={12} aria-hidden="true" />
@@ -66,38 +66,40 @@ export function ModelPicker() {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
-        className="min-w-56 border-zinc-800 bg-zinc-950 text-zinc-200"
+        className="min-w-56 border-border bg-popover text-popover-foreground"
       >
         <DropdownMenuCheckboxItem
           checked={autoRouteOn}
           onCheckedChange={() => onSelectAutoRoute()}
-          className="focus:bg-zinc-900 focus:text-white"
+          className="focus:bg-accent focus:text-accent-foreground"
         >
           <span>Auto-route</span>
         </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator className="bg-zinc-800" />
+        <DropdownMenuSeparator className="bg-border" />
         {Object.entries(models.buckets).map(([bucket, model]) => (
           <DropdownMenuCheckboxItem
             key={bucket}
             checked={pinnedModel === model}
             onCheckedChange={() => onSelectModel(model)}
-            className="focus:bg-zinc-900 focus:text-white"
+            className="focus:bg-accent focus:text-accent-foreground"
           >
             <div className="flex flex-col">
               <span>{BUCKET_LABELS[bucket] ?? bucket}</span>
-              <span className="font-mono text-xs text-zinc-600">{model}</span>
+              <span className="font-mono text-xs text-muted-foreground">
+                {model}
+              </span>
             </div>
           </DropdownMenuCheckboxItem>
         ))}
-        <DropdownMenuSeparator className="bg-zinc-800" />
+        <DropdownMenuSeparator className="bg-border" />
         <DropdownMenuCheckboxItem
           checked={pinnedModel === models.generalist}
           onCheckedChange={() => onSelectModel(models.generalist)}
-          className="focus:bg-zinc-900 focus:text-white"
+          className="focus:bg-accent focus:text-accent-foreground"
         >
           <div className="flex flex-col">
             <span>Generalist</span>
-            <span className="font-mono text-xs text-zinc-600">
+            <span className="font-mono text-xs text-muted-foreground">
               {models.generalist}
             </span>
           </div>

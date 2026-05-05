@@ -12,7 +12,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "flex shrink-0 flex-col border-r border-zinc-900 bg-black transition-[width] duration-200 ease-out",
+        "flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 ease-out",
         collapsed ? "w-16" : "w-72",
       )}
     >
@@ -23,7 +23,7 @@ export function Sidebar() {
         )}
       >
         {!collapsed && (
-          <span className="px-1 text-sm font-medium tracking-tight text-zinc-300">
+          <span className="px-1 text-sm font-medium tracking-tight text-foreground">
             ukiyo
           </span>
         )}
@@ -31,7 +31,7 @@ export function Sidebar() {
           type="button"
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           {collapsed ? (
             <PanelRightIcon size={16} />
@@ -45,7 +45,7 @@ export function Sidebar() {
         <Link
           href="/chat"
           className={cn(
-            "flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 transition-colors hover:bg-zinc-900",
+            "flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent",
             collapsed && "justify-center px-0",
           )}
           aria-label="New chat"

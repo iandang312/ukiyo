@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpIcon } from "lucide-react";
+import { ArrowUpIcon, Square } from "lucide-react";
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 
 interface ComposerProps {
   onSubmit: (content: string) => void;
+  onStop?: () => void;
   disabled?: boolean;
   autoFocus?: boolean;
   placeholder?: string;
@@ -23,9 +24,10 @@ const MAX_HEIGHT_PX = LINE_HEIGHT_PX * MAX_LINES;
 
 export function Composer({
   onSubmit,
+  onStop,
   disabled = false,
   autoFocus = false,
-  placeholder = "Send a message",
+  placeholder = "Reply to Ukiyo…",
 }: ComposerProps) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -71,6 +73,7 @@ export function Composer({
   };
 
   const canSubmit = text.trim().length > 0 && !disabled;
+  const showStop = disabled && !!onStop;
 
   return (
     <div className="px-6 pb-6">
@@ -81,8 +84,8 @@ export function Composer({
       >
         <div
           className={cn(
-            "flex items-end gap-2 rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3",
-            "focus-within:border-zinc-700",
+            "flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-4 py-3",
+            "focus-within:border-ring",
           )}
         >
           <textarea
@@ -96,24 +99,38 @@ export function Composer({
             aria-label="Message"
             placeholder={placeholder}
             className={cn(
-              "flex-1 resize-none border-0 bg-transparent text-[15px] leading-6 text-white placeholder:text-zinc-600",
+              "flex-1 resize-none border-0 bg-transparent text-[15px] leading-6 text-foreground placeholder:text-muted-foreground",
               "focus:outline-none disabled:cursor-not-allowed disabled:opacity-60",
             )}
             style={{ maxHeight: MAX_HEIGHT_PX }}
           />
-          <button
-            type="submit"
-            aria-label="Send message"
-            disabled={!canSubmit}
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-              canSubmit
-                ? "bg-white text-black hover:bg-zinc-200"
-                : "bg-zinc-800 text-zinc-600",
-            )}
-          >
-            <ArrowUpIcon size={16} />
-          </button>
+          {showStop ? (
+            <button
+              type="button"
+              aria-label="Stop generating"
+              onClick={() => onStop?.()}
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+                "bg-primary text-primary-foreground hover:bg-primary/90",
+              )}
+            >
+              <Square size={14} className="fill-current" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              aria-label="Send message"
+              disabled={!canSubmit}
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+                canSubmit
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
+              <ArrowUpIcon size={16} />
+            </button>
+          )}
         </div>
       </form>
     </div>

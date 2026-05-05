@@ -61,42 +61,56 @@ export function Message({ message, conversationId }: MessageProps) {
     return <DesignGeneratingRow />;
   }
 
-  const label = isUser ? "You" : (message.model ?? "assistant");
+  const assistantLabel = message.model ?? "Assistant";
 
-  return (
-    <div className="flex flex-col gap-2">
-      <div
-        aria-hidden="true"
-        className="text-xs uppercase tracking-wide text-zinc-500"
-      >
-        {label}
-      </div>
-      {isUser ? (
-        <div className="text-[15px] leading-[1.7] text-white">
+  if (isUser) {
+    return (
+      <div className="flex justify-end">
+        <div
+          aria-label="Your message"
+          className="max-w-[75%] rounded-2xl bg-muted px-4 py-2.5 text-[15px] leading-[1.6] text-foreground"
+        >
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
-      ) : message.isStreaming ? (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="false"
-          aria-label={`${label} response`}
-          className="text-[15px] leading-[1.7] text-white"
-        >
-          <Streamdown>{message.content}</Streamdown>
-          <StreamingCursor />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-3">
+      <div
+        aria-hidden="true"
+        className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border border-border bg-muted"
+      >
+        <SparklesIcon size={12} className="text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 text-sm font-medium text-foreground">
+          {assistantLabel}
         </div>
-      ) : (
-        <div className="text-[15px] leading-[1.7] text-white">
-          <Streamdown>{message.content}</Streamdown>
-        </div>
-      )}
-      {message.promoteToCanvas && conversationId && !message.isStreaming && (
-        <PromotionButton
-          conversationId={conversationId}
-          prompt={message.promoteToCanvas.prompt}
-        />
-      )}
+        {message.isStreaming ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="false"
+            aria-label={`${assistantLabel} response`}
+            className="text-[15px] leading-[1.7] text-foreground"
+          >
+            <Streamdown>{message.content}</Streamdown>
+            <StreamingCursor />
+          </div>
+        ) : (
+          <div className="text-[15px] leading-[1.7] text-foreground">
+            <Streamdown>{message.content}</Streamdown>
+          </div>
+        )}
+        {message.promoteToCanvas && conversationId && !message.isStreaming && (
+          <PromotionButton
+            conversationId={conversationId}
+            prompt={message.promoteToCanvas.prompt}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -106,7 +120,7 @@ function StreamingCursor() {
     <span
       aria-hidden="true"
       className={cn(
-        "ml-0.5 inline-block h-[1em] w-[2px] translate-y-0.5 bg-zinc-300 align-middle",
+        "ml-0.5 inline-block h-[1em] w-[2px] translate-y-0.5 bg-foreground align-middle",
         "animate-pulse",
       )}
     />
@@ -142,7 +156,7 @@ function DesignGeneratingRow() {
     <div
       role="status"
       aria-live="polite"
-      className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-400"
+      className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-xs text-muted-foreground"
     >
       <SparklesIcon size={14} className="animate-pulse text-blue-400" />
       Generating design…
@@ -169,7 +183,7 @@ function DesignVersionRow({
       <button
         type="button"
         onClick={() => dispatchCanvasFromVersion(conversationId, designVersionId)}
-        className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+        className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <SparklesIcon size={14} className="text-blue-400" />
         Design generated · open in canvas
@@ -182,14 +196,14 @@ function DesignVersionRow({
       type="button"
       onClick={() => dispatchCanvasFromVersion(conversationId, version.id)}
       aria-label={`Open design v${version.version_number} in canvas`}
-      className="group flex w-full max-w-md flex-col overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 transition-colors hover:border-zinc-700"
+      className="group flex w-full max-w-md flex-col overflow-hidden rounded-md border border-border bg-card transition-colors hover:border-ring"
     >
       <DesignThumbnail html={version.html} />
-      <div className="flex items-center justify-between border-t border-zinc-900 px-3 py-2 text-xs">
-        <span className="text-zinc-300">
+      <div className="flex items-center justify-between border-t border-border px-3 py-2 text-xs">
+        <span className="text-foreground">
           Design v{version.version_number} generated
         </span>
-        <span className="text-zinc-500 group-hover:text-zinc-300">
+        <span className="text-muted-foreground group-hover:text-foreground">
           Open →
         </span>
       </div>

@@ -22,7 +22,15 @@ import type { ChatMessage } from "./message";
 // conversations doesn't drop the cache.
 export type DesignStatus = "idle" | "loading" | "empty" | "error" | "ready";
 
+export type ChatTheme = "light" | "dark";
+
 export interface ChatLayoutContextValue {
+  // Phase 7: scoped to /chat. Persisted in localStorage as
+  // "ukiyo:chat-theme"; the .dark class is applied to the chat layout
+  // root only so the rest of the app is unaffected.
+  chatTheme: ChatTheme;
+  setChatTheme: (theme: ChatTheme) => void;
+
   conversations: Conversation[];
   conversationsLoading: boolean;
   refreshConversations: () => Promise<void>;
