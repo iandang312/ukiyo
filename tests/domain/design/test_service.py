@@ -188,6 +188,12 @@ async def test_generate_full_persists_version_with_uids_and_helper(
     assert "ukiyo:select" in persisted
     assert "addEventListener('click'" in persisted
 
+    # Phase 13: scoped-edit overlay positioning needs the rect-request
+    # round-trip. Lock the message-listener half of the contract so a
+    # later refactor of the helper script can't silently drop it.
+    assert "ukiyo:rect_request" in persisted
+    assert "ukiyo:rect_reply" in persisted
+
     # Design's current_version_id was advanced.
     assert design.current_version_id == done.version.id
     assert done.version.version_number == 1

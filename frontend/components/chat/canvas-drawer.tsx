@@ -1,8 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeftIcon, RefreshCwIcon } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ArrowLeftIcon,
+  RefreshCwIcon,
+  SendHorizontalIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Tabs,
@@ -13,6 +24,12 @@ import {
 import { CodeBlock } from "@/components/ai-elements/code-block";
 import { useChatLayout } from "./context";
 import { cn } from "@/lib/utils";
+
+interface SelectionState {
+  uid: string;
+  tag: string;
+  rect?: { x: number; y: number; width: number; height: number };
+}
 
 interface CanvasDrawerProps {
   conversationId: string;
@@ -64,6 +81,7 @@ export function CanvasDrawer({ conversationId }: CanvasDrawerProps) {
       <div className="hidden min-w-0 flex-1 flex-col bg-zinc-950 md:flex">
         <DrawerHeader conversationId={conversationId} title={design?.title} />
         <DrawerBody
+          conversationId={conversationId}
           status={status}
           currentVersion={currentVersion}
           versions={design?.versions ?? []}
@@ -130,6 +148,7 @@ function DrawerHeader({
 }
 
 interface DrawerBodyProps {
+  conversationId: string;
   status: ReturnType<ReturnType<typeof useChatLayout>["getDesignStatus"]>;
   currentVersion: {
     id: string;
@@ -148,6 +167,7 @@ interface DrawerBodyProps {
 }
 
 function DrawerBody({
+  conversationId,
   status,
   currentVersion,
   versions,
@@ -185,7 +205,10 @@ function DrawerBody({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <PreviewCodeTabs html={currentVersion.html} />
+        <PreviewCodeTabs
+          html={currentVersion.html}
+          conversationId={conversationId}
+        />
       </div>
       <VersionTimeline
         versions={versions}
@@ -208,7 +231,13 @@ function EmptyState() {
   );
 }
 
-function PreviewCodeTabs({ html }: { html: string }) {
+function PreviewCodeTabs({
+  html,
+  conversationId,
+}: {
+  html: string;
+  conversationId: string;
+}) {
   return (
     <Tabs
       defaultValue="preview"
@@ -224,7 +253,7 @@ function PreviewCodeTabs({ html }: { html: string }) {
         value="preview"
         className="min-h-0 flex-1 bg-white p-0 data-[state=inactive]:hidden"
       >
-        <CanvasIframe html={html} />
+        <CanvasIframe html={html} conversationId={conversationId} />
       </TabsContent>
       <TabsContent
         value="code"
@@ -236,22 +265,212 @@ function PreviewCodeTabs({ html }: { html: string }) {
   );
 }
 
-function CanvasIframe({ html }: { html: string }) {
+function CanvasIframe({
+  html,
+  conversationId,
+}: {
+  html: string;
+  conversationId: string;
+}) {
   // sandbox="allow-scripts" only — NOT allow-same-origin. The server-baked
   // CSP (connect-src 'none') + the lack of same-origin already neutralize
   // most of what an LLM-generated <script> can do; not granting
   // same-origin keeps it from poking at parent storage / cookies.
   //
-  // The helper script in the baked HTML uses `parent.postMessage(..., '*')`
-  // which works without same-origin; the click-to-edit listener (Seam 3)
-  // hangs off `window.message` to receive it.
+  // The helper script in the baked HTML posts `ukiyo:select` on click and
+  // replies to `ukiyo:rect_request` with the element's bounding rect (a
+  // round-trip is required because we don't have allow-same-origin to
+  // reach into the iframe's document directly).
+  const { sendMessage, isStreaming } = useChatLayout();
+  const streaming = isStreaming(conversationId);
+
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [selection, setSelection] = useState<SelectionState | null>(null);
+  const [instruction, setInstruction] = useState("");
+
+  // Reset selection whenever the rendered HTML changes — a new version
+  // arrived (or the user reverted) and the previously highlighted element
+  // may no longer exist at the same uid.
+  useEffect(() => {
+    setSelection(null);
+    setInstruction("");
+  }, [html]);
+
+  // Single global message listener — handles both `ukiyo:select` (user
+  // clicked an element) and `ukiyo:rect_reply` (iframe answered our rect
+  // request). Stale rect replies (uid drift between request and reply)
+  // are dropped by matching against the current selection's uid.
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      const d = e.data as
+        | { type?: string; uid?: string; tag?: string; rect?: SelectionState["rect"] }
+        | null;
+      if (!d || typeof d !== "object" || !d.type) return;
+
+      if (d.type === "ukiyo:select" && d.uid) {
+        const uid = String(d.uid);
+        const tag = String(d.tag ?? "");
+        setSelection({ uid, tag });
+        // Fire the rect_request immediately. The reply will arrive on
+        // the same listener and patch in the rect.
+        const win = iframeRef.current?.contentWindow;
+        if (win) {
+          win.postMessage({ type: "ukiyo:rect_request", uid }, "*");
+        }
+      } else if (d.type === "ukiyo:rect_reply" && d.uid && d.rect) {
+        const replyUid = String(d.uid);
+        setSelection((prev) => {
+          if (!prev || prev.uid !== replyUid) return prev;
+          return { ...prev, rect: d.rect };
+        });
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, []);
+
+  const closeSelection = useCallback(() => {
+    setSelection(null);
+    setInstruction("");
+  }, []);
+
+  const submitEdit = useCallback(async () => {
+    if (!selection || !instruction.trim() || streaming) return;
+    const uidNum = parseInt(selection.uid, 10);
+    if (Number.isNaN(uidNum)) return;
+    const content = instruction.trim();
+    // Optimistically dismiss the overlay — sendMessage is fire-and-forget
+    // here, the streaming state is reflected by the chat panel and the
+    // drawer's iframe re-renders on `done`.
+    setSelection(null);
+    setInstruction("");
+    await sendMessage(content, conversationId, {
+      surface: "canvas",
+      editScopeUid: uidNum,
+    });
+  }, [selection, instruction, streaming, sendMessage, conversationId]);
+
+  // Esc dismisses the overlay; works regardless of which surface inside
+  // the drawer has focus.
+  useEffect(() => {
+    if (!selection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSelection();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selection, closeSelection]);
+
   return (
-    <iframe
-      title="Design preview"
-      sandbox="allow-scripts"
-      srcDoc={html}
-      className="h-full w-full border-0 bg-white"
-    />
+    <div className="relative h-full w-full overflow-hidden">
+      <iframe
+        ref={iframeRef}
+        title="Design preview"
+        sandbox="allow-scripts"
+        srcDoc={html}
+        className="h-full w-full border-0 bg-white"
+      />
+      {selection && (
+        <SelectionOverlay
+          selection={selection}
+          instruction={instruction}
+          onInstructionChange={setInstruction}
+          onSubmit={submitEdit}
+          onClose={closeSelection}
+          disabled={streaming}
+        />
+      )}
+    </div>
+  );
+}
+
+function SelectionOverlay({
+  selection,
+  instruction,
+  onInstructionChange,
+  onSubmit,
+  onClose,
+  disabled,
+}: {
+  selection: SelectionState;
+  instruction: string;
+  onInstructionChange: (v: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+  disabled: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Autofocus the input as soon as the overlay mounts so the user can
+  // start typing without an extra click.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // The highlight box (positioned over the selected element) is only
+  // rendered once the rect_reply arrives. Pre-rect we still show the
+  // input docked at bottom-center so the user can type immediately —
+  // the rect arrives within ~one frame so this is rarely visible.
+  const rect = selection.rect;
+
+  return (
+    <>
+      {rect && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute rounded-sm ring-2 ring-blue-500/80"
+          style={{
+            top: rect.y,
+            left: rect.x,
+            width: rect.width,
+            height: rect.height,
+          }}
+        />
+      )}
+      <div
+        role="dialog"
+        aria-label={`Edit ${selection.tag.toLowerCase()}`}
+        className="absolute bottom-4 left-1/2 z-10 flex w-[min(36rem,90%)] -translate-x-1/2 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/95 p-2 shadow-2xl shadow-black/50 backdrop-blur"
+      >
+        <span className="px-1 text-xs uppercase tracking-wide text-zinc-500">
+          {selection.tag.toLowerCase() || "element"}
+        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={instruction}
+          disabled={disabled}
+          onChange={(e) => onInstructionChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
+          placeholder="Describe the change…"
+          aria-label="Edit instruction"
+          className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1.5 text-sm text-white outline-none placeholder:text-zinc-600 disabled:opacity-50"
+        />
+        <Button
+          type="button"
+          size="sm"
+          onClick={onSubmit}
+          disabled={disabled || !instruction.trim()}
+          aria-label="Send edit"
+        >
+          <SendHorizontalIcon size={14} />
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={onClose}
+          aria-label="Cancel edit"
+        >
+          <XIcon size={14} />
+        </Button>
+      </div>
+    </>
   );
 }
 

@@ -42,6 +42,15 @@ _CSP_META = (
     '">'
 )
 
+# The click handler is the original Phase 12 contract — kept byte-for-byte
+# so existing tests / persisted versions still grep for "addEventListener('click'"
+# and "ukiyo:select". The `message` listener is a Phase 13 addition: the
+# canvas drawer needs the clicked element's bounding rect to position the
+# scoped-edit overlay. Round-trip via postMessage is required because
+# sandbox="allow-scripts" (without allow-same-origin) prevents the parent
+# from accessing the iframe's document directly. Old versions persisted
+# before this commit lack the rect handler — the frontend falls back to a
+# centered overlay if no rect_reply arrives.
 _HELPER_SCRIPT = (
     "<script>\n"
     "document.addEventListener('click', e => {\n"
@@ -50,6 +59,15 @@ _HELPER_SCRIPT = (
     "  if (el) parent.postMessage("
     "{type:'ukiyo:select', uid: el.dataset.uid, tag: el.tagName}, '*');\n"
     "}, true);\n"
+    "window.addEventListener('message', e => {\n"
+    "  const d = e.data;\n"
+    "  if (!d || d.type !== 'ukiyo:rect_request') return;\n"
+    "  const el = document.querySelector('[data-uid=\"' + d.uid + '\"]');\n"
+    "  if (!el) return;\n"
+    "  const r = el.getBoundingClientRect();\n"
+    "  parent.postMessage({type:'ukiyo:rect_reply', uid: d.uid, "
+    "rect: {x: r.x, y: r.y, width: r.width, height: r.height}}, '*');\n"
+    "});\n"
     "</script>"
 )
 
