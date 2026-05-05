@@ -48,7 +48,7 @@ export default function HomePage() {
         <section className="sticky top-0 h-screen bg-white flex items-center justify-center">
           <div className="max-w-4xl px-6 text-center">
             <h2 className="text-4xl text-black mb-4">
-              modern teams demand tools across the entire stack.
+              modern engineering demands tools across the entire stack.
             </h2>
             <h3 className="text-lg text-gray-600">
               ukiyo combines every industry-leading LLMs and AI models into one seamless experience.
